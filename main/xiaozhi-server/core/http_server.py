@@ -3,6 +3,7 @@ from aiohttp import web
 from config.logger import setup_logging
 from core.api.ota_handler import OTAHandler
 from core.api.vision_handler import VisionHandler
+from core.api.mode_control_api import ModeControlAPI
 
 TAG = __name__
 
@@ -13,6 +14,7 @@ class SimpleHttpServer:
         self.logger = setup_logging()
         self.ota_handler = OTAHandler(config)
         self.vision_handler = VisionHandler(config)
+        self.mode_control_api = ModeControlAPI(config)
 
     def _get_websocket_url(self, local_ip: str, port: int) -> str:
         """获取websocket地址
@@ -56,6 +58,16 @@ class SimpleHttpServer:
                     web.get("/mcp/vision/explain", self.vision_handler.handle_get),
                     web.post("/mcp/vision/explain", self.vision_handler.handle_post),
                     web.options("/mcp/vision/explain", self.vision_handler.handle_post),
+                ]
+            )
+
+            # 添加模式控制API路由
+            app.add_routes(
+                [
+                    web.get("/xiaozhi/mode/status", self.mode_control_api.handle_mode_status),
+                    web.post("/xiaozhi/mode/switch", self.mode_control_api.handle_mode_switch),
+                    web.get("/xiaozhi/mode/config", self.mode_control_api.handle_global_config),
+                    web.post("/xiaozhi/mode/config", self.mode_control_api.handle_global_config),
                 ]
             )
 

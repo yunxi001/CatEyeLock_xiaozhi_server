@@ -41,6 +41,35 @@ server:
   mqtt_signature_key: null
   # UDP网关配置
   udp_gateway: null
+# 音视频流功能配置
+audio_video_stream:
+  # 是否启用音视频流功能
+  enabled: false
+  # 最大模式切换频率（每分钟）
+  max_switch_frequency: 5
+  # 音频转发功能
+  enable_audio_forwarding: false
+  # 视频转发功能
+  enable_video_forwarding: false
+  # 最大缓冲区大小（字节）
+  max_buffer_size: 81920  # 80KB
+  # 是否启用音频流处理
+  enable_audio_stream: true
+  # 是否启用视频流处理
+  enable_video_stream: false
+  # 音频数据包大小限制（字节）
+  max_audio_packet_size: 102400  # 100KB
+  # 视频数据包大小限制（字节）
+  max_video_packet_size: 1048576  # 1MB
+  # 模式切换超时时间（秒）
+  mode_switch_timeout: 10
+  # 连接超时时间（秒）
+  connection_timeout: 300  # 5分钟
+  # 心跳间隔（秒）
+  heartbeat_interval: 30
+  # 数据包重传次数
+  packet_retry_count: 3
+
 log:
   # 设置控制台输出的日志格式，时间、日志级别、标签、消息
   log_format: "<green>{time:YYMMDD HH:mm:ss}</green>[{version}_{selected_module}][<light-blue>{extra[tag]}</light-blue>]-<level>{level}</level>-<light-green>{message}</light-green>"

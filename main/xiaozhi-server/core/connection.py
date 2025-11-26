@@ -10,6 +10,7 @@ import threading
 import traceback
 import subprocess
 import websockets
+import struct
 
 from core.utils.util import (
     extract_json_from_string,
@@ -41,6 +42,9 @@ from config.manage_api_client import DeviceNotFoundException, DeviceBindExceptio
 from core.utils.prompt_manager import PromptManager
 from core.utils.voiceprint_provider import VoiceprintProvider
 from core.utils import textUtils
+from core.mode_switcher import ModeSwitcher, ModeType
+from core.media_mode_processor import MediaModeProcessor
+from core.control_mode_processor import ControlModeProcessor
 
 TAG = __name__
 
@@ -160,6 +164,12 @@ class ConnectionHandler:
         # 初始化提示词管理器
         self.prompt_manager = PromptManager(config, self.logger)
 
+        # 模式切换相关组件
+        self.mode_switcher = ModeSwitcher(config)
+        self.media_mode_processor = None
+        self.control_mode_processor = None
+        self.current_mode = ModeType.CONTROL  # 默认为控制模式
+
     async def handle_connection(self, ws):
         try:
             # 获取并验证headers
@@ -194,6 +204,13 @@ class ConnectionHandler:
 
             self.welcome_msg = self.config["xiaozhi"]
             self.welcome_msg["session_id"] = self.session_id
+
+            # 初始化模式切换器并设置连接处理器引用
+            self.mode_switcher.set_connection_handler(self)
+
+            # 初始化模式处理器
+            self.media_mode_processor = MediaModeProcessor(ws, self.mode_switcher, self.config)
+            self.control_mode_processor = ControlModeProcessor(self, self.config)
 
             # 获取差异化配置
             self._initialize_private_config()
@@ -261,21 +278,144 @@ class ConnectionHandler:
                 )
 
     async def _route_message(self, message):
-        """消息路由"""
+        """消息路由 - 根据当前模式处理消息"""
+        # 检查是否为模式切换相关的控制消息
         if isinstance(message, str):
-            await handleTextMessage(self, message)
+            # 尝试解析为JSON，检查是否为模式切换请求
+            try:
+                msg_json = json.loads(message)
+                if isinstance(msg_json, dict) and msg_json.get("type") == "mode_change":
+                    # 处理模式切换请求
+                    await self._handle_mode_change_request(msg_json)
+                    return
+            except json.JSONDecodeError:
+                # 不是有效的JSON，继续正常处理
+                pass
+
+            # 根据当前模式处理文本消息
+            if self.mode_switcher.is_media_mode():
+                # 音视频模式下，忽略大部分文本消息，只处理特定控制消息
+                await self._handle_media_mode_text_message(message)
+            else:
+                # 控制模式下，正常处理文本消息
+                await handleTextMessage(self, message)
+
         elif isinstance(message, bytes):
-            if self.vad is None or self.asr is None:
+            # 根据当前模式处理字节消息
+            if self.mode_switcher.is_media_mode():
+                # 音视频模式下，处理音视频数据
+                await self._handle_media_mode_bytes_message(message)
+            else:
+                # 控制模式下，处理音频输入
+                await self._handle_control_mode_bytes_message(message)
+
+    async def _handle_mode_change_request(self, msg_json: dict):
+        """处理模式切换请求"""
+        try:
+            target_mode = msg_json.get("mode")
+            if not target_mode:
+                self.logger.bind(tag=TAG).warning("模式切换请求缺少mode参数")
                 return
 
-            # 处理来自MQTT网关的音频包
-            if self.conn_from_mqtt_gateway and len(message) >= 16:
-                handled = await self._process_mqtt_audio_message(message)
-                if handled:
-                    return
+            # 请求模式切换
+            device_id = self.headers.get("device-id")
+            auth_token = self.headers.get("authorization", "").replace("Bearer ", "")
 
-            # 不需要头部处理或没有头部时，直接处理原始消息
-            self.asr_audio_queue.put(message)
+            result = await self.mode_switcher.request_mode_switch(
+                target_mode,
+                device_id=device_id,
+                auth_token=auth_token
+            )
+
+            # 发送响应
+            response = {
+                "type": "mode_confirm",
+                "mode": target_mode,
+                "request_id": msg_json.get("request_id", "unknown"),
+                "status": "success" if result["success"] else "failed",
+                "message": result.get("message", result.get("error", "Unknown error"))
+            }
+
+            await self.websocket.send(json.dumps(response))
+
+            if result["success"]:
+                self.current_mode = ModeType(target_mode)
+                self.logger.bind(tag=TAG).info(f"成功切换到{target_mode}模式")
+            else:
+                self.logger.bind(tag=TAG).error(f"模式切换失败: {result.get('error', 'Unknown error')}")
+
+        except Exception as e:
+            self.logger.bind(tag=TAG).error(f"处理模式切换请求失败: {str(e)}")
+
+    async def _handle_media_mode_text_message(self, message: str):
+        """处理音视频模式下的文本消息"""
+        # 在音视频模式下，主要只处理特定的控制消息
+        try:
+            msg_json = json.loads(message)
+            if isinstance(msg_json, dict):
+                msg_type = msg_json.get("type")
+
+                # 可以根据需要处理特定的控制消息
+                if msg_type == "ping":
+                    # 响应ping消息
+                    response = {"type": "pong", "timestamp": int(time.time() * 1000)}
+                    await self.websocket.send(json.dumps(response))
+                elif msg_type in ["audio_control", "video_control"]:
+                    # 处理音视频控制命令
+                    await self._handle_media_control(msg_json)
+                else:
+                    # 其他消息在音视频模式下忽略
+                    self.logger.bind(tag=TAG).debug(f"音视频模式下忽略消息: {msg_type}")
+        except json.JSONDecodeError:
+            # 非JSON消息，忽略
+            pass
+
+    async def _handle_media_mode_bytes_message(self, message: bytes):
+        """处理音视频模式下的字节消息"""
+        # 检查数据包类型，根据前缀区分音频、视频或控制数据
+        if len(message) < 4:
+            return  # 数据包太小，忽略
+
+        header = message[:4]
+
+        if header == b'AUDD':  # 音频数据
+            if len(message) < 12:  # 至少需要4字节头部+8字节时间戳
+                return
+            timestamp_bytes = message[4:12]
+            timestamp = struct.unpack('>Q', timestamp_bytes)[0]
+            audio_data = message[12:]
+            await self.media_mode_processor.process_audio_data(audio_data, timestamp)
+        elif header == b'VIDD':  # 视频数据
+            if len(message) < 12:
+                return
+            timestamp_bytes = message[4:12]
+            timestamp = struct.unpack('>Q', timestamp_bytes)[0]
+            video_data = message[12:]
+            await self.media_mode_processor.process_video_data(video_data, timestamp)
+        else:
+            # 未识别的数据，可能是原始音频数据或其他格式
+            # 作为音频数据处理
+            await self.media_mode_processor.process_audio_data(message)
+
+    async def _handle_control_mode_bytes_message(self, message: bytes):
+        """处理控制模式下的字节消息（音频输入）"""
+        if self.vad is None or self.asr is None:
+            return
+
+        # 处理来自MQTT网关的音频包
+        if self.conn_from_mqtt_gateway and len(message) >= 16:
+            handled = await self._process_mqtt_audio_message(message)
+            if handled:
+                return
+
+        # 不需要头部处理或没有头部时，直接处理原始消息
+        self.asr_audio_queue.put(message)
+
+    async def _handle_media_control(self, msg_json: dict):
+        """处理音视频控制命令"""
+        # 可以在这里添加对音视频控制命令的具体处理
+        control_type = msg_json.get("type")
+        self.logger.bind(tag=TAG).info(f"处理音视频控制命令: {control_type}")
 
     async def _process_mqtt_audio_message(self, message):
         """
@@ -1005,6 +1145,13 @@ class ConnectionHandler:
     async def close(self, ws=None):
         """资源清理方法"""
         try:
+            # 清理模式处理器
+            if self.media_mode_processor:
+                try:
+                    await self.media_mode_processor.stop_processing()
+                except Exception as e:
+                    self.logger.bind(tag=TAG).error(f"停止媒体处理器时出错: {str(e)}")
+
             # 清理音频缓冲区
             if hasattr(self, "audio_buffer"):
                 self.audio_buffer.clear()

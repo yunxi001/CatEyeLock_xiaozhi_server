@@ -41,6 +41,7 @@ from config.manage_api_client import DeviceNotFoundException, DeviceBindExceptio
 from core.utils.prompt_manager import PromptManager
 from core.utils.voiceprint_provider import VoiceprintProvider
 from core.utils import textUtils
+from core.connection_manager import ConnectionManager
 
 TAG = __name__
 
@@ -159,6 +160,9 @@ class ConnectionHandler:
 
         # 初始化提示词管理器
         self.prompt_manager = PromptManager(config, self.logger)
+        
+        # 工作模式：normal | monitor
+        self.current_mode = "normal"
 
     async def handle_connection(self, ws):
         try:
@@ -199,6 +203,11 @@ class ConnectionHandler:
             self._initialize_private_config()
             # 异步初始化
             self.executor.submit(self._initialize_components)
+            
+            # 注册到 ConnectionManager
+            if self.device_id:
+                manager = ConnectionManager.get_instance()
+                manager.register_esp32(self.device_id, self)
 
             try:
                 async for message in self.websocket:
@@ -1005,6 +1014,11 @@ class ConnectionHandler:
     async def close(self, ws=None):
         """资源清理方法"""
         try:
+            # 从 ConnectionManager 注销
+            if self.device_id:
+                manager = ConnectionManager.get_instance()
+                manager.unregister_esp32(self.device_id)
+            
             # 清理音频缓冲区
             if hasattr(self, "audio_buffer"):
                 self.audio_buffer.clear()

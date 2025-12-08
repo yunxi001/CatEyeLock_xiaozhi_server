@@ -7,6 +7,8 @@ from core.handle.textHandler.listenMessageHandler import ListenTextMessageHandle
 from core.handle.textHandler.mcpMessageHandler import McpTextMessageHandler
 from core.handle.textMessageHandler import TextMessageHandler
 from core.handle.textHandler.serverMessageHandler import ServerTextMessageHandler
+from core.handle.textHandler.systemMessageHandler import SystemTextMessageHandler
+from core.handle.textHandler.faceRecognitionHandler import FaceRecognitionHandler, FaceManagementHandler
 
 TAG = __name__
 
@@ -27,6 +29,9 @@ class TextMessageHandlerRegistry:
             IotTextMessageHandler(),
             McpTextMessageHandler(),
             ServerTextMessageHandler(),
+            SystemTextMessageHandler(),
+            FaceRecognitionHandler(),
+            FaceManagementHandler(),
         ]
 
         for handler in handlers:

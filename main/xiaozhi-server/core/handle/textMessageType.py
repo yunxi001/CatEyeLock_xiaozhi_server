@@ -9,3 +9,6 @@ class TextMessageType(Enum):
     IOT = "iot"
     MCP = "mcp"
     SERVER = "server"
+    SYSTEM = "system"
+    FACE_RECOGNITION = "face_recognition"
+    FACE_MANAGEMENT = "face_management"

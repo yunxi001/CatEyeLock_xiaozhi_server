@@ -1,0 +1,24 @@
+{
+  "enabled": true,
+  "name": "源代码文档同步",
+  "description": "监听项目中的源代码文件（Java、Python、TypeScript、Vue、JavaScript等），当文件被修改或新增时，自动提示更新README或docs文件夹中的文档，记录变更内容",
+  "version": "1",
+  "when": {
+    "type": "fileEdited",
+    "patterns": [
+      "**/*.java",
+      "**/*.py",
+      "**/*.ts",
+      "**/*.vue",
+      "**/*.js",
+      "**/*.jsx",
+      "**/*.tsx"
+    ]
+  },
+  "then": {
+    "type": "askAgent",
+    "prompt": "检测到源代码文件发生变化。请执行以下操作：\n\n1. 识别被修改或新增的文件路径\n2. 分析修改的大致内容（简要描述变更）\n3. 总结修改实现的功能\n\n然后在 docs/my_docs/CHANGELOG.md 的最后更新变更日志，记录：\n- 修改/新增的文件名\n- 修改或新增的具体位置（简述，如在某函数，某类的某个位置）\n- 修改时间\n- 变更内容简述\n- 实现的功能说明\n\n"
+  },
+  "workspaceFolderName": "xiaozhi-esp32-server",
+  "shortName": "source-docs-sync"
+}

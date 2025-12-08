@@ -4,6 +4,7 @@ import json
 import websockets
 from config.logger import setup_logging
 from core.connection import ConnectionHandler
+from core.app_connection import AppConnectionHandler
 from config.config_loader import get_config_from_api
 from core.auth import AuthManager, AuthenticationError
 from core.utils.modules_initialize import initialize_modules
@@ -52,6 +53,40 @@ class WebSocketServer:
             await asyncio.Future()
 
     async def _handle_connection(self, websocket):
+        # 获取请求路径
+        request_path = websocket.request.path
+        
+        # 判断是 App 端点还是 ESP32 端点
+        if request_path.startswith("/ws/app"):
+            # App 端点 - 使用 AppConnectionHandler
+            await self._handle_app_connection(websocket)
+        else:
+            # ESP32 端点 - 使用现有的 ConnectionHandler
+            await self._handle_esp32_connection(websocket)
+    
+    async def _handle_app_connection(self, websocket):
+        """处理 App 连接"""
+        try:
+            handler = AppConnectionHandler(self.config)
+            await handler.handle_connection(websocket)
+        except Exception as e:
+            self.logger.bind(tag=TAG).error(f"处理 App 连接时出错: {e}")
+        finally:
+            # 强制关闭连接
+            try:
+                if hasattr(websocket, "closed") and not websocket.closed:
+                    await websocket.close()
+                elif hasattr(websocket, "state") and websocket.state.name != "CLOSED":
+                    await websocket.close()
+                else:
+                    await websocket.close()
+            except Exception as close_error:
+                self.logger.bind(tag=TAG).error(
+                    f"关闭 App 连接时出错: {close_error}"
+                )
+    
+    async def _handle_esp32_connection(self, websocket):
+        """处理 ESP32 连接"""
         headers = dict(websocket.request.headers)
         if headers.get("device-id", None) is None:
             # 尝试从 URL 的查询参数中获取 device-id

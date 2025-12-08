@@ -274,17 +274,40 @@ class ConnectionHandler:
         if isinstance(message, str):
             await handleTextMessage(self, message)
         elif isinstance(message, bytes):
-            if self.vad is None or self.asr is None:
+            if self.current_mode == "monitor":
+                # 监控模式：直接转发给 App，不解析
+                await self._forward_to_apps(message)
+            else:
+                # 正常模式：原始音频送入 ASR
+                if self.vad is not None and self.asr is not None:
+                    self.asr_audio_queue.put(message)
+    
+    async def _forward_to_apps(self, data: bytes):
+        """转发数据到所有关联的 App（直接转发，不解析）
+        
+        Args:
+            data: 要转发的原始数据（ESP32 发送的 BinaryProtocol2 格式）
+        """
+        try:
+            manager = ConnectionManager.get_instance()
+            app_conns = manager.get_app_conns(self.device_id)
+            
+            if not app_conns:
                 return
-
-            # 处理来自MQTT网关的音频包
-            if self.conn_from_mqtt_gateway and len(message) >= 16:
-                handled = await self._process_mqtt_audio_message(message)
-                if handled:
-                    return
-
-            # 不需要头部处理或没有头部时，直接处理原始消息
-            self.asr_audio_queue.put(message)
+            
+            # 广播给所有 App
+            for app_conn in app_conns:
+                if app_conn.websocket:
+                    await app_conn.websocket.send(data)
+            
+            # 调试已关闭：监控模式音频直接转发给 App，不送入 ASR
+            
+            self.logger.bind(tag=TAG).debug(
+                f"转发数据到 {len(app_conns)} 个 App: {len(data)} bytes"
+            )
+            
+        except Exception as e:
+            self.logger.bind(tag=TAG).error(f"转发数据到 App 失败: {e}")
 
     async def _process_mqtt_audio_message(self, message):
         """

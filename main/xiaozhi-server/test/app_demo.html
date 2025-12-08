@@ -1,0 +1,891 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>智能门锁 App Demo</title>
+    <!-- 注意：浏览器端解码原始 OPUS 帧需要专门的库 -->
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 20px;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+            overflow: hidden;
+        }
+        .header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 30px;
+            text-align: center;
+        }
+        .header h1 { font-size: 28px; margin-bottom: 10px; }
+        .status {
+            display: inline-block;
+            padding: 8px 16px;
+            border-radius: 20px;
+            font-size: 14px;
+            font-weight: 600;
+            margin-top: 10px;
+        }
+        .status.disconnected { background: rgba(255,255,255,0.2); }
+        .status.connected { background: rgba(76, 217, 100, 0.3); }
+        .content { padding: 30px; }
+        .section { margin-bottom: 30px; }
+        .section-title {
+            font-size: 18px;
+            font-weight: 600;
+            color: #333;
+            margin-bottom: 15px;
+            padding-bottom: 10px;
+            border-bottom: 2px solid #f0f0f0;
+        }
+        .input-group { margin-bottom: 15px; }
+        .input-group label {
+            display: block;
+            font-size: 14px;
+            color: #666;
+            margin-bottom: 8px;
+            font-weight: 500;
+        }
+        .input-group input {
+            width: 100%;
+            padding: 12px 15px;
+            border: 2px solid #e0e0e0;
+            border-radius: 10px;
+            font-size: 14px;
+            transition: border-color 0.3s;
+        }
+        .input-group input:focus { outline: none; border-color: #667eea; }
+        .btn {
+            padding: 12px 24px;
+            border: none;
+            border-radius: 10px;
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s;
+            margin-right: 10px;
+            margin-bottom: 10px;
+        }
+        .btn-primary {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+        }
+        .btn-primary:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(102, 126, 234, 0.4);
+        }
+        .btn-success { background: #4cd964; color: white; }
+        .btn-success:hover { background: #3dc853; }
+        .btn-danger { background: #ff3b30; color: white; }
+        .btn-danger:hover { background: #e6342a; }
+        .btn:disabled { opacity: 0.5; cursor: not-allowed; transform: none !important; }
+        .log-container {
+            background: #f8f9fa;
+            border-radius: 10px;
+            padding: 15px;
+            max-height: 300px;
+            overflow-y: auto;
+            font-family: 'Courier New', monospace;
+            font-size: 12px;
+        }
+        .log-entry { padding: 8px; margin-bottom: 5px; border-radius: 5px; word-wrap: break-word; }
+        .log-info { background: #e3f2fd; color: #1976d2; }
+        .log-success { background: #e8f5e9; color: #388e3c; }
+        .log-error { background: #ffebee; color: #d32f2f; }
+        .log-warning { background: #fff3e0; color: #f57c00; }
+        .video-container {
+            background: #000;
+            border-radius: 10px;
+            overflow: hidden;
+            margin-top: 15px;
+            position: relative;
+            padding-top: 56.25%;
+        }
+        .video-container img {
+            position: absolute;
+            top: 0; left: 0;
+            width: 100%; height: 100%;
+            object-fit: contain;
+        }
+        .video-placeholder {
+            position: absolute;
+            top: 50%; left: 50%;
+            transform: translate(-50%, -50%);
+            color: #666;
+            text-align: center;
+        }
+        .stats {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+            gap: 15px;
+            margin-top: 15px;
+        }
+        .stat-card {
+            background: #f8f9fa;
+            padding: 15px;
+            border-radius: 10px;
+            text-align: center;
+        }
+        .stat-value { font-size: 24px; font-weight: 700; color: #667eea; margin-bottom: 5px; }
+        .stat-label { font-size: 12px; color: #666; }
+        .audio-controls { display: flex; align-items: center; gap: 15px; margin-top: 10px; }
+        .volume-slider { width: 100px; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🔐 智能门锁 App Demo</h1>
+            <div class="status" id="status">未连接</div>
+        </div>
+        
+        <div class="content">
+            <!-- 连接配置 -->
+            <div class="section">
+                <div class="section-title">1. 连接配置</div>
+                <div class="input-group">
+                    <label>服务器地址</label>
+                    <input type="text" id="serverUrl" value="ws://localhost:8000/ws/app">
+                </div>
+                <div class="input-group">
+                    <label>设备 ID (Device ID)</label>
+                    <input type="text" id="deviceId" value="AA:BB:CC:DD:EE:FF">
+                </div>
+                <button class="btn btn-primary" id="connectBtn" onclick="connect()">连接服务器</button>
+                <button class="btn btn-danger" id="disconnectBtn" onclick="disconnect()" disabled>断开连接</button>
+            </div>
+            
+            <!-- 模式控制 -->
+            <div class="section">
+                <div class="section-title">2. 模式控制</div>
+                <button class="btn btn-success" id="startMonitorBtn" onclick="startMonitor()" disabled>启动监控模式</button>
+                <button class="btn btn-danger" id="stopMonitorBtn" onclick="stopMonitor()" disabled>停止监控模式</button>
+            </div>
+            
+            <!-- 视频显示 -->
+            <div class="section">
+                <div class="section-title">3. 视频监控</div>
+                <div class="video-container" id="videoContainer">
+                    <div class="video-placeholder">
+                        <div style="font-size: 48px; margin-bottom: 10px;">📹</div>
+                        <div>等待视频数据...</div>
+                    </div>
+                </div>
+                <div class="stats">
+                    <div class="stat-card">
+                        <div class="stat-value" id="videoFrames">0</div>
+                        <div class="stat-label">视频帧数</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-value" id="videoFps">0</div>
+                        <div class="stat-label">帧率 (FPS)</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-value" id="audioPackets">0</div>
+                        <div class="stat-label">音频包数</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-value" id="dataReceived">0 KB</div>
+                        <div class="stat-label">接收数据</div>
+                    </div>
+                </div>
+                <div class="audio-controls">
+                    <label>🔊 音量:</label>
+                    <input type="range" id="volumeSlider" class="volume-slider" min="0" max="100" value="80" onchange="setVolume(this.value)">
+                    <span id="volumeValue">80%</span>
+                    <button class="btn btn-primary" id="muteBtn" onclick="toggleMute()">静音</button>
+                </div>
+            </div>
+            
+            <!-- 音频对讲 -->
+            <div class="section">
+                <div class="section-title">4. 音频对讲</div>
+                <button class="btn btn-primary" id="startTalkBtn" onclick="startTalk()" disabled>开始对讲</button>
+                <button class="btn btn-danger" id="stopTalkBtn" onclick="stopTalk()" disabled>停止对讲</button>
+                <p style="font-size: 12px; color: #666; margin-top: 10px;">
+                    ⚠️ 对讲功能需要麦克风权限，音频将以 PCM 格式发送
+                </p>
+            </div>
+            
+            <!-- 人脸管理 -->
+            <div class="section">
+                <div class="section-title">5. 人脸管理</div>
+                <div style="display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 15px;">
+                    <button class="btn btn-primary" onclick="showRegisterForm()">录入人脸</button>
+                    <button class="btn btn-primary" onclick="getPersons()" id="getPersonsBtn" disabled>查看人员列表</button>
+                    <button class="btn btn-primary" onclick="getVisits()" id="getVisitsBtn" disabled>查看到访记录</button>
+                </div>
+                
+                <!-- 人脸录入表单 -->
+                <div id="registerForm" style="display: none; background: #f8f9fa; padding: 15px; border-radius: 10px; margin-bottom: 15px;">
+                    <h4 style="margin-bottom: 15px;">录入新人脸</h4>
+                    <div class="input-group">
+                        <label>姓名</label>
+                        <input type="text" id="personName" placeholder="请输入姓名">
+                    </div>
+                    <div class="input-group">
+                        <label>关系类型</label>
+                        <select id="relationType" style="width: 100%; padding: 12px; border: 2px solid #e0e0e0; border-radius: 10px;">
+                            <option value="family">家人</option>
+                            <option value="friend">朋友</option>
+                            <option value="colleague">同事</option>
+                            <option value="property">物业</option>
+                            <option value="courier">快递</option>
+                            <option value="delivery">外卖</option>
+                            <option value="tutor">家教</option>
+                            <option value="classmate">同学</option>
+                            <option value="other">其他</option>
+                        </select>
+                    </div>
+                    <div class="input-group">
+                        <label>人脸照片</label>
+                        <input type="file" id="faceImage" accept="image/*" onchange="previewImage(this)">
+                        <img id="imagePreview" style="max-width: 200px; margin-top: 10px; display: none; border-radius: 10px;">
+                    </div>
+                    <div class="input-group">
+                        <label>权限时段</label>
+                        <div style="display: flex; gap: 10px;">
+                            <input type="time" id="timeStart" value="08:00" style="flex: 1; padding: 10px; border: 2px solid #e0e0e0; border-radius: 10px;">
+                            <span style="line-height: 40px;">至</span>
+                            <input type="time" id="timeEnd" value="22:00" style="flex: 1; padding: 10px; border: 2px solid #e0e0e0; border-radius: 10px;">
+                        </div>
+                    </div>
+                    <button class="btn btn-success" onclick="registerFace()">提交录入</button>
+                    <button class="btn btn-danger" onclick="hideRegisterForm()">取消</button>
+                </div>
+                
+                <!-- 人员列表 -->
+                <div id="personsList" style="display: none;"></div>
+                
+                <!-- 到访记录 -->
+                <div id="visitsList" style="display: none;"></div>
+            </div>
+            
+            <!-- 日志 -->
+            <div class="section">
+                <div class="section-title">6. 日志</div>
+                <div class="log-container" id="logContainer"></div>
+                <button class="btn btn-primary" onclick="clearLog()" style="margin-top: 10px;">清空日志</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let ws = null;
+        let videoFrameCount = 0;
+        let audioPacketCount = 0;
+        let totalDataReceived = 0;
+        
+        // 帧率计算
+        let fpsFrameCount = 0;
+        let fpsLastTime = 0;
+        let fpsInterval = null;
+        
+        // 音频播放相关
+        let audioContext = null;
+        let opusDecoder = null;
+        let audioGain = null;
+        let isMuted = false;
+        let audioInitialized = false;
+        
+        // 对讲相关
+        let mediaStream = null;
+        let audioProcessor = null;
+        let isTalking = false;
+
+        function addLog(message, type = 'info') {
+            const logContainer = document.getElementById('logContainer');
+            const logEntry = document.createElement('div');
+            logEntry.className = `log-entry log-${type}`;
+            const timestamp = new Date().toLocaleTimeString();
+            logEntry.textContent = `[${timestamp}] ${message}`;
+            logContainer.appendChild(logEntry);
+            logContainer.scrollTop = logContainer.scrollHeight;
+            // 限制日志数量
+            while (logContainer.children.length > 100) {
+                logContainer.removeChild(logContainer.firstChild);
+            }
+        }
+
+        function clearLog() {
+            document.getElementById('logContainer').innerHTML = '';
+        }
+
+        function updateStatus(connected) {
+            const statusEl = document.getElementById('status');
+            const connectBtn = document.getElementById('connectBtn');
+            const disconnectBtn = document.getElementById('disconnectBtn');
+            const startMonitorBtn = document.getElementById('startMonitorBtn');
+            const stopMonitorBtn = document.getElementById('stopMonitorBtn');
+            const startTalkBtn = document.getElementById('startTalkBtn');
+            const getPersonsBtn = document.getElementById('getPersonsBtn');
+            const getVisitsBtn = document.getElementById('getVisitsBtn');
+            
+            if (connected) {
+                statusEl.textContent = '已连接';
+                statusEl.className = 'status connected';
+                connectBtn.disabled = true;
+                disconnectBtn.disabled = false;
+                startMonitorBtn.disabled = false;
+                stopMonitorBtn.disabled = false;
+                startTalkBtn.disabled = false;
+                getPersonsBtn.disabled = false;
+                getVisitsBtn.disabled = false;
+                startFpsCounter();
+            } else {
+                statusEl.textContent = '未连接';
+                statusEl.className = 'status disconnected';
+                connectBtn.disabled = false;
+                disconnectBtn.disabled = true;
+                startMonitorBtn.disabled = true;
+                stopMonitorBtn.disabled = true;
+                startTalkBtn.disabled = true;
+                getPersonsBtn.disabled = true;
+                getVisitsBtn.disabled = true;
+                stopFpsCounter();
+            }
+        }
+        
+        function startFpsCounter() {
+            fpsLastTime = performance.now();
+            fpsFrameCount = 0;
+            fpsInterval = setInterval(() => {
+                const now = performance.now();
+                const elapsed = (now - fpsLastTime) / 1000;
+                const fps = elapsed > 0 ? fpsFrameCount / elapsed : 0;
+                document.getElementById('videoFps').textContent = fps.toFixed(1);
+                fpsFrameCount = 0;
+                fpsLastTime = now;
+            }, 1000);
+        }
+        
+        function stopFpsCounter() {
+            if (fpsInterval) {
+                clearInterval(fpsInterval);
+                fpsInterval = null;
+            }
+            document.getElementById('videoFps').textContent = '0';
+        }
+
+        // 初始化音频系统
+        async function initAudio() {
+            if (audioInitialized) return true;
+            
+            try {
+                // 创建 AudioContext - 使用默认采样率，后续会重采样
+                audioContext = new (window.AudioContext || window.webkitAudioContext)();
+                
+                // 创建增益节点用于音量控制
+                audioGain = audioContext.createGain();
+                audioGain.connect(audioContext.destination);
+                audioGain.gain.value = 0.8;
+                
+                // 注意：浏览器端无法直接解码原始 OPUS 帧
+                // 原始 OPUS 帧需要专门的 WebAssembly 解码器
+                // 当前版本暂不支持音频播放，仅显示音频包计数
+                addLog('音频系统已初始化（播放功能开发中）', 'warning');
+                addLog('ESP32 音频播放需要原生 App 支持', 'info');
+                
+                audioInitialized = true;
+                return true;
+            } catch (error) {
+                addLog(`音频初始化失败: ${error.message}`, 'error');
+                return false;
+            }
+        }
+
+        // 播放 OPUS 音频（当前版本暂不支持）
+        async function playOpusAudio(opusData) {
+            // 浏览器无法直接解码原始 OPUS 帧
+            // 需要使用 WebAssembly 版本的 libopus 或原生 App
+            // 当前仅记录收到的音频包
+        }
+
+        function setVolume(value) {
+            const volume = value / 100;
+            if (audioGain) {
+                audioGain.gain.value = volume;
+            }
+            document.getElementById('volumeValue').textContent = value + '%';
+        }
+
+        function toggleMute() {
+            isMuted = !isMuted;
+            document.getElementById('muteBtn').textContent = isMuted ? '取消静音' : '静音';
+            if (audioGain) {
+                audioGain.gain.value = isMuted ? 0 : document.getElementById('volumeSlider').value / 100;
+            }
+        }
+
+        function connect() {
+            const serverUrl = document.getElementById('serverUrl').value;
+            const deviceId = document.getElementById('deviceId').value;
+
+            if (!serverUrl || !deviceId) {
+                addLog('请填写服务器地址和设备 ID', 'error');
+                return;
+            }
+
+            addLog(`正在连接到 ${serverUrl}...`, 'info');
+
+            try {
+                ws = new WebSocket(serverUrl);
+                ws.binaryType = 'arraybuffer';
+
+                ws.onopen = async () => {
+                    addLog('WebSocket 连接已建立', 'success');
+                    
+                    // 初始化音频
+                    await initAudio();
+                    
+                    // 发送认证消息
+                    const helloMsg = {
+                        type: 'hello',
+                        device_id: deviceId,
+                        client_type: 'app'
+                    };
+                    ws.send(JSON.stringify(helloMsg));
+                    addLog('已发送认证消息', 'info');
+                };
+
+                ws.onmessage = (event) => {
+                    if (typeof event.data === 'string') {
+                        handleTextMessage(event.data);
+                    } else {
+                        handleBinaryMessage(event.data);
+                    }
+                };
+
+                ws.onerror = (error) => {
+                    addLog('WebSocket 错误', 'error');
+                    console.error('WebSocket error:', error);
+                };
+
+                ws.onclose = () => {
+                    addLog('WebSocket 连接已关闭', 'warning');
+                    updateStatus(false);
+                    ws = null;
+                };
+
+            } catch (error) {
+                addLog(`连接失败: ${error.message}`, 'error');
+            }
+        }
+
+        function disconnect() {
+            stopTalk();
+            if (ws) {
+                ws.close();
+                ws = null;
+                updateStatus(false);
+                addLog('已断开连接', 'info');
+            }
+        }
+
+        function handleTextMessage(data) {
+            try {
+                const msg = JSON.parse(data);
+                addLog(`收到消息: ${JSON.stringify(msg).substring(0, 200)}...`, 'info');
+
+                if (msg.type === 'hello') {
+                    if (msg.status === 'ok') {
+                        addLog('认证成功！', 'success');
+                        updateStatus(true);
+                    } else {
+                        addLog(`认证失败: ${msg.message}`, 'error');
+                        disconnect();
+                    }
+                } else if (msg.type === 'system') {
+                    if (msg.status === 'success') {
+                        addLog(`系统命令执行成功: ${msg.command}`, 'success');
+                    } else {
+                        addLog(`系统命令失败: ${msg.message}`, 'error');
+                    }
+                } else if (msg.type === 'face_management') {
+                    handleFaceManagementResponse(msg);
+                } else if (msg.type === 'visit_notification') {
+                    handleVisitNotification(msg);
+                }
+            } catch (error) {
+                addLog(`解析消息失败: ${error.message}`, 'error');
+            }
+        }
+        
+        function handleFaceManagementResponse(msg) {
+            const action = msg.action;
+            const status = msg.status;
+            
+            if (status === 'success') {
+                if (action === 'register') {
+                    addLog(`人脸录入成功！ID: ${msg.person_id}`, 'success');
+                    hideRegisterForm();
+                    getPersons();
+                } else if (action === 'get_persons') {
+                    displayPersonsList(msg.data);
+                } else if (action === 'get_visits') {
+                    displayVisitsList(msg.data);
+                } else if (action === 'delete_person') {
+                    addLog('人员删除成功', 'success');
+                    getPersons();
+                } else if (action === 'update_permission') {
+                    addLog('权限更新成功', 'success');
+                }
+            } else {
+                addLog(`${action} 失败: ${msg.error}`, 'error');
+            }
+        }
+        
+        function handleVisitNotification(msg) {
+            const data = msg.data || {};
+            const personName = data.person_name || '陌生人';
+            const result = data.result;
+            const granted = data.access_granted;
+            
+            addLog(`🔔 到访通知: ${personName} - ${result === 'known' ? '已识别' : '未识别'} - ${granted ? '已开门' : '未开门'}`, 'warning');
+        }
+
+        function handleBinaryMessage(data) {
+            const buffer = new Uint8Array(data);
+            totalDataReceived += buffer.length;
+            document.getElementById('dataReceived').textContent = (totalDataReceived / 1024).toFixed(2) + ' KB';
+
+            // 解析 BinaryProtocol2 格式 (16字节头部)
+            if (buffer.length >= 16) {
+                const version = (buffer[0] << 8) | buffer[1];
+                const type = (buffer[2] << 8) | buffer[3];
+                const reserved = (buffer[4] << 24) | (buffer[5] << 16) | (buffer[6] << 8) | buffer[7];
+                const timestamp = (buffer[8] << 24) | (buffer[9] << 16) | (buffer[10] << 8) | buffer[11];
+                const payloadSize = (buffer[12] << 24) | (buffer[13] << 16) | (buffer[14] << 8) | buffer[15];
+
+                if (version === 2 && type === 0) {
+                    const payload = buffer.slice(16, 16 + payloadSize);
+                    
+                    if (reserved === 0) {
+                        // 音频数据
+                        audioPacketCount++;
+                        document.getElementById('audioPackets').textContent = audioPacketCount;
+                        
+                        // 播放音频
+                        playOpusAudio(payload);
+                    } else {
+                        // 视频数据
+                        videoFrameCount++;
+                        fpsFrameCount++;
+                        document.getElementById('videoFrames').textContent = videoFrameCount;
+                        displayVideoFrame(payload);
+                    }
+                }
+            }
+        }
+
+        function displayVideoFrame(jpegData) {
+            const blob = new Blob([jpegData], { type: 'image/jpeg' });
+            const url = URL.createObjectURL(blob);
+            
+            const videoContainer = document.getElementById('videoContainer');
+            let img = videoContainer.querySelector('img');
+            
+            if (!img) {
+                img = document.createElement('img');
+                videoContainer.innerHTML = '';
+                videoContainer.appendChild(img);
+            }
+            
+            if (img.src && img.src.startsWith('blob:')) {
+                URL.revokeObjectURL(img.src);
+            }
+            
+            img.src = url;
+        }
+
+        function startMonitor() {
+            if (!ws) return;
+            
+            // 确保 AudioContext 已启动（需要用户交互）
+            if (audioContext && audioContext.state === 'suspended') {
+                audioContext.resume();
+            }
+            
+            const msg = { type: 'system', command: 'start_monitor' };
+            ws.send(JSON.stringify(msg));
+            addLog('发送启动监控模式命令', 'info');
+        }
+
+        function stopMonitor() {
+            if (!ws) return;
+            const msg = { type: 'system', command: 'stop_monitor' };
+            ws.send(JSON.stringify(msg));
+            addLog('发送停止监控模式命令', 'info');
+        }
+
+        // 开始对讲 - 使用 PCM 格式发送 (24kHz)
+        async function startTalk() {
+            if (isTalking) return;
+            
+            try {
+                // 获取麦克风权限 - 使用 24kHz 采样率（与服务器 TTS 发送给 ESP32 的格式一致）
+                mediaStream = await navigator.mediaDevices.getUserMedia({ 
+                    audio: {
+                        sampleRate: 24000,
+                        channelCount: 1,
+                        echoCancellation: true,
+                        noiseSuppression: true
+                    } 
+                });
+                
+                // 创建音频处理上下文 - 24kHz
+                const talkContext = new AudioContext({ sampleRate: 24000 });
+                const source = talkContext.createMediaStreamSource(mediaStream);
+                
+                // 使用 ScriptProcessor 获取 PCM 数据
+                const bufferSize = 4096;
+                audioProcessor = talkContext.createScriptProcessor(bufferSize, 1, 1);
+                
+                audioProcessor.onaudioprocess = (e) => {
+                    if (!isTalking || !ws || ws.readyState !== WebSocket.OPEN) return;
+                    
+                    const inputData = e.inputBuffer.getChannelData(0);
+                    
+                    // 转换为 16-bit PCM
+                    const pcm16 = new Int16Array(inputData.length);
+                    for (let i = 0; i < inputData.length; i++) {
+                        const s = Math.max(-1, Math.min(1, inputData[i]));
+                        pcm16[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
+                    }
+                    
+                    // 发送 PCM 数据
+                    ws.send(pcm16.buffer);
+                };
+                
+                source.connect(audioProcessor);
+                audioProcessor.connect(talkContext.destination);
+                
+                isTalking = true;
+                document.getElementById('startTalkBtn').disabled = true;
+                document.getElementById('stopTalkBtn').disabled = false;
+                addLog('开始对讲 (PCM 24kHz)', 'success');
+                
+            } catch (error) {
+                addLog(`启动对讲失败: ${error.message}`, 'error');
+            }
+        }
+
+        function stopTalk() {
+            isTalking = false;
+            
+            if (audioProcessor) {
+                audioProcessor.disconnect();
+                audioProcessor = null;
+            }
+            
+            if (mediaStream) {
+                mediaStream.getTracks().forEach(track => track.stop());
+                mediaStream = null;
+            }
+            
+            document.getElementById('startTalkBtn').disabled = false;
+            document.getElementById('stopTalkBtn').disabled = true;
+            addLog('停止对讲', 'info');
+        }
+
+        // ==================== 人脸管理功能 ====================
+        
+        let selectedImageBase64 = null;
+        
+        function showRegisterForm() {
+            document.getElementById('registerForm').style.display = 'block';
+            document.getElementById('personsList').style.display = 'none';
+            document.getElementById('visitsList').style.display = 'none';
+        }
+        
+        function hideRegisterForm() {
+            document.getElementById('registerForm').style.display = 'none';
+            document.getElementById('personName').value = '';
+            document.getElementById('faceImage').value = '';
+            document.getElementById('imagePreview').style.display = 'none';
+            selectedImageBase64 = null;
+        }
+        
+        function previewImage(input) {
+            if (input.files && input.files[0]) {
+                const reader = new FileReader();
+                reader.onload = (e) => {
+                    document.getElementById('imagePreview').src = e.target.result;
+                    document.getElementById('imagePreview').style.display = 'block';
+                    // 保存 base64 数据（去掉前缀）
+                    selectedImageBase64 = e.target.result.split(',')[1];
+                };
+                reader.readAsDataURL(input.files[0]);
+            }
+        }
+        
+        function registerFace() {
+            if (!ws || ws.readyState !== WebSocket.OPEN) {
+                addLog('请先连接服务器', 'error');
+                return;
+            }
+            
+            const name = document.getElementById('personName').value.trim();
+            const relationType = document.getElementById('relationType').value;
+            const timeStart = document.getElementById('timeStart').value;
+            const timeEnd = document.getElementById('timeEnd').value;
+            
+            if (!name) {
+                addLog('请输入姓名', 'error');
+                return;
+            }
+            
+            if (!selectedImageBase64) {
+                addLog('请选择人脸照片', 'error');
+                return;
+            }
+            
+            const msg = {
+                type: 'face_management',
+                action: 'register',
+                data: {
+                    name: name,
+                    relation_type: relationType,
+                    images: [selectedImageBase64],
+                    permission: {
+                        type: 'permanent',
+                        time_start: timeStart,
+                        time_end: timeEnd,
+                        day_type: 'daily'
+                    }
+                }
+            };
+            
+            ws.send(JSON.stringify(msg));
+            addLog('正在录入人脸...', 'info');
+        }
+        
+        function getPersons() {
+            if (!ws || ws.readyState !== WebSocket.OPEN) {
+                addLog('请先连接服务器', 'error');
+                return;
+            }
+            
+            const msg = {
+                type: 'face_management',
+                action: 'get_persons'
+            };
+            ws.send(JSON.stringify(msg));
+            addLog('正在获取人员列表...', 'info');
+        }
+        
+        function getVisits() {
+            if (!ws || ws.readyState !== WebSocket.OPEN) {
+                addLog('请先连接服务器', 'error');
+                return;
+            }
+            
+            const msg = {
+                type: 'face_management',
+                action: 'get_visits',
+                data: {
+                    page: 1,
+                    page_size: 20
+                }
+            };
+            ws.send(JSON.stringify(msg));
+            addLog('正在获取到访记录...', 'info');
+        }
+        
+        function deletePerson(personId) {
+            if (!confirm('确定要删除此人员吗？')) return;
+            
+            const msg = {
+                type: 'face_management',
+                action: 'delete_person',
+                data: { person_id: personId }
+            };
+            ws.send(JSON.stringify(msg));
+            addLog('正在删除人员...', 'info');
+        }
+        
+        function displayPersonsList(persons) {
+            const container = document.getElementById('personsList');
+            container.style.display = 'block';
+            document.getElementById('registerForm').style.display = 'none';
+            document.getElementById('visitsList').style.display = 'none';
+            
+            if (!persons || persons.length === 0) {
+                container.innerHTML = '<p style="color: #666; text-align: center;">暂无录入人员</p>';
+                return;
+            }
+            
+            const relationNames = {
+                family: '家人', friend: '朋友', colleague: '同事', property: '物业',
+                courier: '快递', delivery: '外卖', tutor: '家教', classmate: '同学', other: '其他'
+            };
+            
+            let html = '<div style="background: #f8f9fa; padding: 15px; border-radius: 10px;">';
+            html += '<h4 style="margin-bottom: 15px;">已录入人员 (' + persons.length + '人)</h4>';
+            html += '<table style="width: 100%; border-collapse: collapse;">';
+            html += '<tr style="background: #e0e0e0;"><th style="padding: 10px; text-align: left;">姓名</th><th style="padding: 10px;">关系</th><th style="padding: 10px;">权限时段</th><th style="padding: 10px;">操作</th></tr>';
+            
+            persons.forEach(p => {
+                const perm = p.permission || {};
+                html += '<tr style="border-bottom: 1px solid #e0e0e0;">';
+                html += '<td style="padding: 10px;">' + p.name + '</td>';
+                html += '<td style="padding: 10px; text-align: center;">' + (relationNames[p.relation_type] || p.relation_type) + '</td>';
+                html += '<td style="padding: 10px; text-align: center;">' + (perm.time_start || '00:00') + ' - ' + (perm.time_end || '23:59') + '</td>';
+                html += '<td style="padding: 10px; text-align: center;"><button class="btn btn-danger" style="padding: 5px 10px; font-size: 12px;" onclick="deletePerson(' + p.id + ')">删除</button></td>';
+                html += '</tr>';
+            });
+            
+            html += '</table></div>';
+            container.innerHTML = html;
+        }
+        
+        function displayVisitsList(data) {
+            const container = document.getElementById('visitsList');
+            container.style.display = 'block';
+            document.getElementById('registerForm').style.display = 'none';
+            document.getElementById('personsList').style.display = 'none';
+            
+            const records = data.records || [];
+            
+            if (records.length === 0) {
+                container.innerHTML = '<p style="color: #666; text-align: center;">暂无到访记录</p>';
+                return;
+            }
+            
+            const resultNames = { known: '已识别', unknown: '陌生人', no_face: '无人脸' };
+            
+            let html = '<div style="background: #f8f9fa; padding: 15px; border-radius: 10px;">';
+            html += '<h4 style="margin-bottom: 15px;">到访记录 (共' + data.total + '条)</h4>';
+            html += '<table style="width: 100%; border-collapse: collapse;">';
+            html += '<tr style="background: #e0e0e0;"><th style="padding: 10px; text-align: left;">时间</th><th style="padding: 10px;">人员</th><th style="padding: 10px;">结果</th><th style="padding: 10px;">开门</th></tr>';
+            
+            records.forEach(r => {
+                html += '<tr style="border-bottom: 1px solid #e0e0e0;">';
+                html += '<td style="padding: 10px;">' + (r.visit_time || '-') + '</td>';
+                html += '<td style="padding: 10px; text-align: center;">' + (r.person_name || '陌生人') + '</td>';
+                html += '<td style="padding: 10px; text-align: center;">' + (resultNames[r.result] || r.result) + '</td>';
+                html += '<td style="padding: 10px; text-align: center;">' + (r.access_granted ? '✅' : '❌') + '</td>';
+                html += '</tr>';
+            });
+            
+            html += '</table></div>';
+            container.innerHTML = html;
+        }
+
+        window.onload = () => {
+            addLog('App Demo 已加载', 'success');
+            addLog('请配置服务器地址和设备 ID，然后点击"连接服务器"', 'info');
+        };
+    </script>
+</body>
+</html>

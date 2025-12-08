@@ -1,0 +1,32 @@
+# 人脸识别模块配置文件
+
+database:
+  host: 127.0.0.1
+  port: 3306
+  user: root
+  password: "123456"
+  database: smart_doorlock
+  pool_size: 5
+
+recognition:
+  tolerance: 0.6          # 人脸匹配阈值，越小越严格
+  model: "hog"            # 检测模型: hog(CPU快) 或 cnn(GPU精确)
+  num_jitters: 1          # 编码重采样次数，越大越精确但越慢
+
+storage:
+  base_dir: "data/face_recognition"
+  faces_dir: "data/face_recognition/faces"
+  visits_dir: "data/face_recognition/visits"
+
+greetings:
+  family: "欢迎回家，{name}！"
+  friend: "您好，{name}，欢迎来访！"
+  colleague: "您好，{name}，请进！"
+  property: "您好，物业人员{name}，请进！"
+  courier: "您好，快递员{name}，请稍等！"
+  delivery: "您好，外卖员{name}，请稍等！"
+  tutor: "您好，{name}老师，请进！"
+  classmate: "您好，{name}同学，请进！"
+  other: "您好，{name}，请进！"
+  unknown: "您好，请问您找谁？"
+  denied: "抱歉，{name}，{reason}。"

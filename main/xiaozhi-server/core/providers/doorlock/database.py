@@ -111,6 +111,78 @@ class Database:
                 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
             """)
             
+            # 创建 device_status 表（设备状态记录）
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS device_status (
+                    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+                    device_id VARCHAR(64) NOT NULL,
+                    battery INT,
+                    lux INT,
+                    lock_state TINYINT,
+                    light_state TINYINT,
+                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                    INDEX idx_device_time (device_id, created_at)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+            """)
+            
+            # 创建 device_events 表（设备事件记录）
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS device_events (
+                    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+                    device_id VARCHAR(64) NOT NULL,
+                    event_type VARCHAR(32) NOT NULL,
+                    param INT,
+                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                    INDEX idx_device_time (device_id, created_at)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+            """)
+            
+            # 创建 unlock_logs 表（开锁日志记录）
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS unlock_logs (
+                    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+                    device_id VARCHAR(64) NOT NULL,
+                    method VARCHAR(16) NOT NULL,
+                    user_id INT,
+                    result TINYINT,
+                    fail_count INT DEFAULT 0,
+                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                    INDEX idx_device_time (device_id, created_at)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+            """)
+            
+            # 创建 doorlock_users 表（门锁用户信息）
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS doorlock_users (
+                    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+                    device_id VARCHAR(64) NOT NULL,
+                    user_id INT NOT NULL,
+                    name VARCHAR(64),
+                    role VARCHAR(16) DEFAULT 'member',
+                    finger_ids JSON,
+                    nfc_ids JSON,
+                    face_registered TINYINT DEFAULT 0,
+                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                    UNIQUE KEY uk_device_user (device_id, user_id)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+            """)
+            
+            # 创建 media_files 表（媒体文件元数据）
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS media_files (
+                    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+                    device_id VARCHAR(64) NOT NULL,
+                    file_type VARCHAR(16) NOT NULL,
+                    file_path VARCHAR(256) NOT NULL,
+                    file_size INT,
+                    duration INT,
+                    user_id INT,
+                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                    INDEX idx_device_type_time (device_id, file_type, created_at)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+            """)
+            
             conn.commit()
             if self.logger:
                 self.logger.bind(tag=TAG).info("数据库表初始化完成")
@@ -424,6 +496,455 @@ class Database:
             cursor.execute("UPDATE visit_records SET notified = TRUE WHERE id = %s", (visit_id,))
             conn.commit()
             return cursor.rowcount > 0
+        finally:
+            cursor.close()
+            conn.close()
+
+    # ==================== 设备状态 CRUD ====================
+    
+    def save_device_status(self, device_id: str, battery: int, lux: int, 
+                           lock_state: int, light_state: int) -> int:
+        """保存设备状态记录"""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        try:
+            cursor.execute("""
+                INSERT INTO device_status (device_id, battery, lux, lock_state, light_state)
+                VALUES (%s, %s, %s, %s, %s)
+            """, (device_id, battery, lux, lock_state, light_state))
+            conn.commit()
+            return cursor.lastrowid
+        finally:
+            cursor.close()
+            conn.close()
+    
+    def get_latest_status(self, device_id: str) -> Optional[dict]:
+        """获取设备最新状态
+        
+        Args:
+            device_id: 设备 ID
+            
+        Returns:
+            最新状态记录，如果没有则返回 None
+        """
+        conn = self.get_connection()
+        cursor = conn.cursor(dictionary=True)
+        try:
+            cursor.execute("""
+                SELECT battery, lux, lock_state, light_state, created_at as last_update
+                FROM device_status 
+                WHERE device_id = %s 
+                ORDER BY created_at DESC LIMIT 1
+            """, (device_id,))
+            return cursor.fetchone()
+        finally:
+            cursor.close()
+            conn.close()
+    
+    def get_status_history(self, device_id: str, limit: int = 100, 
+                           offset: int = 0) -> Tuple[List[dict], int]:
+        """获取设备状态历史（带分页）
+        
+        Args:
+            device_id: 设备 ID
+            limit: 每页数量
+            offset: 偏移量
+            
+        Returns:
+            (记录列表, 总数)
+        """
+        conn = self.get_connection()
+        cursor = conn.cursor(dictionary=True)
+        try:
+            # 查询总数
+            cursor.execute("""
+                SELECT COUNT(*) as total FROM device_status WHERE device_id = %s
+            """, (device_id,))
+            total = cursor.fetchone()['total']
+            
+            # 查询记录
+            cursor.execute("""
+                SELECT id, battery, lux, lock_state, light_state, created_at
+                FROM device_status 
+                WHERE device_id = %s 
+                ORDER BY created_at DESC LIMIT %s OFFSET %s
+            """, (device_id, limit, offset))
+            records = cursor.fetchall()
+            
+            # 转换 datetime 为字符串
+            for r in records:
+                if r.get('created_at'):
+                    r['created_at'] = r['created_at'].isoformat()
+            
+            return records, total
+        finally:
+            cursor.close()
+            conn.close()
+    
+    def get_device_status_history(self, device_id: str, limit: int = 100) -> List[dict]:
+        """获取设备状态历史（兼容旧接口）"""
+        records, _ = self.get_status_history(device_id, limit)
+        return records
+
+    # ==================== 设备事件 CRUD ====================
+    
+    def save_device_event(self, device_id: str, event_type: str, param: int = None) -> int:
+        """保存设备事件记录"""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        try:
+            cursor.execute("""
+                INSERT INTO device_events (device_id, event_type, param)
+                VALUES (%s, %s, %s)
+            """, (device_id, event_type, param))
+            conn.commit()
+            return cursor.lastrowid
+        finally:
+            cursor.close()
+            conn.close()
+    
+    def get_events(self, device_id: str, event_type: str = None, 
+                   limit: int = 100, offset: int = 0) -> Tuple[List[dict], int]:
+        """获取设备事件历史（带分页）
+        
+        Args:
+            device_id: 设备 ID
+            event_type: 事件类型过滤（可选）
+            limit: 每页数量
+            offset: 偏移量
+            
+        Returns:
+            (记录列表, 总数)
+        """
+        conn = self.get_connection()
+        cursor = conn.cursor(dictionary=True)
+        try:
+            # 构建查询条件
+            where_sql = "device_id = %s"
+            params = [device_id]
+            if event_type:
+                where_sql += " AND event_type = %s"
+                params.append(event_type)
+            
+            # 查询总数
+            cursor.execute(f"SELECT COUNT(*) as total FROM device_events WHERE {where_sql}", params)
+            total = cursor.fetchone()['total']
+            
+            # 查询记录
+            cursor.execute(f"""
+                SELECT id, event_type, param, created_at
+                FROM device_events 
+                WHERE {where_sql}
+                ORDER BY created_at DESC LIMIT %s OFFSET %s
+            """, params + [limit, offset])
+            records = cursor.fetchall()
+            
+            # 转换 datetime 为字符串
+            for r in records:
+                if r.get('created_at'):
+                    r['created_at'] = r['created_at'].isoformat()
+            
+            return records, total
+        finally:
+            cursor.close()
+            conn.close()
+    
+    def get_device_events(self, device_id: str, event_type: str = None, 
+                          limit: int = 100) -> List[dict]:
+        """获取设备事件历史（兼容旧接口）"""
+        records, _ = self.get_events(device_id, event_type, limit)
+        return records
+
+    # ==================== 开锁日志 CRUD ====================
+    
+    def save_unlock_log(self, device_id: str, method: str, user_id: int,
+                        result: bool, fail_count: int = 0) -> int:
+        """保存开锁日志"""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        try:
+            cursor.execute("""
+                INSERT INTO unlock_logs (device_id, method, user_id, result, fail_count)
+                VALUES (%s, %s, %s, %s, %s)
+            """, (device_id, method, user_id, 1 if result else 0, fail_count))
+            conn.commit()
+            return cursor.lastrowid
+        finally:
+            cursor.close()
+            conn.close()
+    
+    def get_unlock_logs(self, device_id: str, method: str = None, 
+                        result: int = None, limit: int = 100, 
+                        offset: int = 0) -> Tuple[List[dict], int]:
+        """获取开锁日志历史（带分页和过滤）
+        
+        Args:
+            device_id: 设备 ID
+            method: 开锁方式过滤（可选）
+            result: 结果过滤（可选，1=成功，0=失败）
+            limit: 每页数量
+            offset: 偏移量
+            
+        Returns:
+            (记录列表, 总数)
+        """
+        conn = self.get_connection()
+        cursor = conn.cursor(dictionary=True)
+        try:
+            # 构建查询条件
+            where_sql = "device_id = %s"
+            params = [device_id]
+            if method:
+                where_sql += " AND method = %s"
+                params.append(method)
+            if result is not None:
+                where_sql += " AND result = %s"
+                params.append(result)
+            
+            # 查询总数
+            cursor.execute(f"SELECT COUNT(*) as total FROM unlock_logs WHERE {where_sql}", params)
+            total = cursor.fetchone()['total']
+            
+            # 查询记录
+            cursor.execute(f"""
+                SELECT id, method, user_id, result, fail_count, created_at
+                FROM unlock_logs 
+                WHERE {where_sql}
+                ORDER BY created_at DESC LIMIT %s OFFSET %s
+            """, params + [limit, offset])
+            records = cursor.fetchall()
+            
+            # 转换 datetime 为字符串
+            for r in records:
+                if r.get('created_at'):
+                    r['created_at'] = r['created_at'].isoformat()
+            
+            return records, total
+        finally:
+            cursor.close()
+            conn.close()
+    
+    def get_media_file_by_id(self, file_id: int) -> Optional[dict]:
+        """根据 ID 获取单个媒体文件信息
+        
+        Args:
+            file_id: 媒体文件 ID
+            
+        Returns:
+            文件信息字典，如果不存在则返回 None
+        """
+        conn = self.get_connection()
+        cursor = conn.cursor(dictionary=True)
+        try:
+            cursor.execute("""
+                SELECT id, device_id, file_type, file_path, file_size, duration, user_id, created_at
+                FROM media_files 
+                WHERE id = %s
+            """, (file_id,))
+            record = cursor.fetchone()
+            if record and record.get('created_at'):
+                record['created_at'] = record['created_at'].isoformat()
+            return record
+        finally:
+            cursor.close()
+            conn.close()
+
+    # ==================== 门锁用户 CRUD ====================
+    
+    def save_doorlock_user(self, device_id: str, user_id: int, name: str = None,
+                           role: str = 'member') -> int:
+        """保存门锁用户"""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        try:
+            cursor.execute("""
+                INSERT INTO doorlock_users (device_id, user_id, name, role)
+                VALUES (%s, %s, %s, %s)
+                ON DUPLICATE KEY UPDATE name = VALUES(name), role = VALUES(role)
+            """, (device_id, user_id, name, role))
+            conn.commit()
+            return cursor.lastrowid
+        finally:
+            cursor.close()
+            conn.close()
+    
+    def update_doorlock_user_finger(self, device_id: str, user_id: int, 
+                                     finger_ids: list) -> bool:
+        """更新用户指纹 ID 列表"""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        try:
+            import json
+            cursor.execute("""
+                UPDATE doorlock_users SET finger_ids = %s
+                WHERE device_id = %s AND user_id = %s
+            """, (json.dumps(finger_ids), device_id, user_id))
+            conn.commit()
+            return cursor.rowcount > 0
+        finally:
+            cursor.close()
+            conn.close()
+    
+    def update_doorlock_user_nfc(self, device_id: str, user_id: int, 
+                                  nfc_ids: list) -> bool:
+        """更新用户 NFC ID 列表"""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        try:
+            import json
+            cursor.execute("""
+                UPDATE doorlock_users SET nfc_ids = %s
+                WHERE device_id = %s AND user_id = %s
+            """, (json.dumps(nfc_ids), device_id, user_id))
+            conn.commit()
+            return cursor.rowcount > 0
+        finally:
+            cursor.close()
+            conn.close()
+    
+    def get_doorlock_users(self, device_id: str) -> List[dict]:
+        """获取设备的所有用户"""
+        conn = self.get_connection()
+        cursor = conn.cursor(dictionary=True)
+        try:
+            cursor.execute("""
+                SELECT * FROM doorlock_users WHERE device_id = %s
+            """, (device_id,))
+            return cursor.fetchall()
+        finally:
+            cursor.close()
+            conn.close()
+
+    # ==================== 媒体文件 CRUD ====================
+    
+    def save_media_file(self, device_id: str, file_type: str, file_path: str,
+                        file_size: int = None, duration: int = None, 
+                        user_id: int = None) -> int:
+        """保存媒体文件元数据"""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        try:
+            cursor.execute("""
+                INSERT INTO media_files (device_id, file_type, file_path, file_size, duration, user_id)
+                VALUES (%s, %s, %s, %s, %s, %s)
+            """, (device_id, file_type, file_path, file_size, duration, user_id))
+            conn.commit()
+            return cursor.lastrowid
+        finally:
+            cursor.close()
+            conn.close()
+    
+    def get_media_files(self, device_id: str, file_type: str = None,
+                        date_from: str = None, date_to: str = None,
+                        limit: int = 100, offset: int = 0) -> Tuple[List[dict], int]:
+        """获取媒体文件列表（带分页和日期过滤）
+        
+        Args:
+            device_id: 设备 ID
+            file_type: 文件类型过滤（可选）
+            date_from: 开始日期（可选，格式 YYYY-MM-DD）
+            date_to: 结束日期（可选，格式 YYYY-MM-DD）
+            limit: 每页数量
+            offset: 偏移量
+            
+        Returns:
+            (记录列表, 总数)
+        """
+        conn = self.get_connection()
+        cursor = conn.cursor(dictionary=True)
+        try:
+            # 构建查询条件
+            where_sql = "device_id = %s"
+            params = [device_id]
+            if file_type:
+                where_sql += " AND file_type = %s"
+                params.append(file_type)
+            if date_from:
+                where_sql += " AND DATE(created_at) >= %s"
+                params.append(date_from)
+            if date_to:
+                where_sql += " AND DATE(created_at) <= %s"
+                params.append(date_to)
+            
+            # 查询总数
+            cursor.execute(f"SELECT COUNT(*) as total FROM media_files WHERE {where_sql}", params)
+            total = cursor.fetchone()['total']
+            
+            # 查询记录
+            cursor.execute(f"""
+                SELECT id, file_type, file_path, file_size, duration, user_id, created_at
+                FROM media_files 
+                WHERE {where_sql}
+                ORDER BY created_at DESC LIMIT %s OFFSET %s
+            """, params + [limit, offset])
+            records = cursor.fetchall()
+            
+            # 转换 datetime 为字符串
+            for r in records:
+                if r.get('created_at'):
+                    r['created_at'] = r['created_at'].isoformat()
+            
+            return records, total
+        finally:
+            cursor.close()
+            conn.close()
+
+    # ==================== 数据清理 ====================
+    
+    def cleanup_old_data(self, status_days: int = 7, event_days: int = 30, 
+                         log_days: int = 90, media_days: int = 30) -> dict:
+        """清理过期数据
+        
+        Args:
+            status_days: 状态记录保留天数
+            event_days: 事件记录保留天数
+            log_days: 开锁日志保留天数
+            media_days: 媒体文件保留天数（人脸图片）
+            
+        Returns:
+            各表删除的记录数
+        """
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        result = {}
+        try:
+            # 清理设备状态
+            cursor.execute("""
+                DELETE FROM device_status 
+                WHERE created_at < DATE_SUB(NOW(), INTERVAL %s DAY)
+            """, (status_days,))
+            result['device_status'] = cursor.rowcount
+            
+            # 清理设备事件
+            cursor.execute("""
+                DELETE FROM device_events 
+                WHERE created_at < DATE_SUB(NOW(), INTERVAL %s DAY)
+            """, (event_days,))
+            result['device_events'] = cursor.rowcount
+            
+            # 清理开锁日志
+            cursor.execute("""
+                DELETE FROM unlock_logs 
+                WHERE created_at < DATE_SUB(NOW(), INTERVAL %s DAY)
+            """, (log_days,))
+            result['unlock_logs'] = cursor.rowcount
+            
+            # 获取需要删除的媒体文件路径
+            cursor.execute("""
+                SELECT file_path FROM media_files 
+                WHERE created_at < DATE_SUB(NOW(), INTERVAL %s DAY)
+            """, (media_days,))
+            result['media_files_paths'] = [row[0] for row in cursor.fetchall()]
+            
+            # 清理媒体文件记录
+            cursor.execute("""
+                DELETE FROM media_files 
+                WHERE created_at < DATE_SUB(NOW(), INTERVAL %s DAY)
+            """, (media_days,))
+            result['media_files'] = cursor.rowcount
+            
+            conn.commit()
+            return result
         finally:
             cursor.close()
             conn.close()

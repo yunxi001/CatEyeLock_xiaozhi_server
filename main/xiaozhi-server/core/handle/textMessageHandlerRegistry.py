@@ -9,6 +9,21 @@ from core.handle.textMessageHandler import TextMessageHandler
 from core.handle.textHandler.serverMessageHandler import ServerTextMessageHandler
 from core.handle.textHandler.systemMessageHandler import SystemTextMessageHandler
 from core.handle.textHandler.faceRecognitionHandler import FaceRecognitionHandler, FaceManagementHandler
+# 智能门锁协议 v5.0 新增处理器
+from core.handle.textHandler.statusReportHandler import StatusReportHandler
+from core.handle.textHandler.eventReportHandler import EventReportHandler
+from core.handle.textHandler.logReportHandler import LogReportHandler
+from core.handle.textHandler.ackHandler import AckHandler
+from core.handle.textHandler.userMgmtResultHandler import UserMgmtResultHandler
+from core.handle.textHandler.heartbeatHandler import HeartbeatHandler
+# App 协议 v2.2 新增处理器
+from core.handle.textHandler.queryHandler import QueryHandler
+from core.handle.textHandler.mediaDownloadHandler import MediaDownloadHandler, MediaDownloadChunkHandler
+from core.handle.textHandler.commandProxyHandler import (
+    LockControlProxyHandler,
+    DevControlProxyHandler,
+    UserMgmtProxyHandler
+)
 
 TAG = __name__
 
@@ -32,6 +47,20 @@ class TextMessageHandlerRegistry:
             SystemTextMessageHandler(),
             FaceRecognitionHandler(),
             FaceManagementHandler(),
+            # 智能门锁协议 v5.0 新增
+            StatusReportHandler(),
+            EventReportHandler(),
+            LogReportHandler(),
+            AckHandler(),
+            UserMgmtResultHandler(),
+            HeartbeatHandler(),
+            # App 协议 v2.2 新增
+            QueryHandler(),
+            MediaDownloadHandler(),
+            MediaDownloadChunkHandler(),
+            LockControlProxyHandler(),
+            DevControlProxyHandler(),
+            UserMgmtProxyHandler(),
         ]
 
         for handler in handlers:

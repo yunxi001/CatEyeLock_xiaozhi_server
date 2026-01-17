@@ -10,6 +10,7 @@ import threading
 import traceback
 import subprocess
 import websockets
+import opuslib_next
 
 from core.utils.util import (
     extract_json_from_string,
@@ -274,19 +275,166 @@ class ConnectionHandler:
         if isinstance(message, str):
             await handleTextMessage(self, message)
         elif isinstance(message, bytes):
+            # 检查是否为 BinaryProtocol2 格式的人脸识别请求（type=2）
+            if len(message) >= 16:
+                # 解析 BinaryProtocol2 头部的 type 字段（大端序，偏移 2-4 字节）
+                msg_type = int.from_bytes(message[2:4], 'big')
+                self.logger.bind(tag=TAG).debug(
+                    f"收到二进制消息: len={len(message)}, type={msg_type}, "
+                    f"header={message[:16].hex()}"
+                )
+                if msg_type == 2:
+                    # type=2 表示人脸识别请求
+                    self.logger.bind(tag=TAG).info(f"识别到人脸识别请求，数据长度: {len(message)}")
+                    await self._handle_face_recognition_binary(message)
+                    return
+            
             if self.current_mode == "monitor":
-                # 监控模式：直接转发给 App，不解析
-                await self._forward_to_apps(message)
+                # 监控模式：转发给 App + 录像
+                await self._handle_monitor_data(message, msg_type if len(message) >= 16 else 0)
             else:
                 # 正常模式：原始音频送入 ASR
                 if self.vad is not None and self.asr is not None:
                     self.asr_audio_queue.put(message)
-    
-    async def _forward_to_apps(self, data: bytes):
-        """转发数据到所有关联的 App（直接转发，不解析）
+
+    async def _handle_face_recognition_binary(self, message: bytes):
+        """处理二进制格式的人脸识别请求
+        
+        ESP32 直接发送 BinaryProtocol2 格式的二进制数据，避免 base64 编码导致数据过大。
+        协议头 type=2 表示人脸识别请求。
         
         Args:
-            data: 要转发的原始数据（ESP32 发送的 BinaryProtocol2 格式）
+            message: BinaryProtocol2 格式的完整二进制数据
+        """
+        try:
+            from core.handle.textHandler.faceRecognitionHandler import get_face_service
+            from core.connection_manager import ConnectionManager
+            import uuid
+            
+            face_service = get_face_service(self.logger)
+            
+            # 直接解析二进制数据，提取 JPEG 图像
+            try:
+                jpeg_data = face_service.parse_image(message)
+            except Exception as e:
+                self.logger.bind(tag=TAG).error(f"图像解析失败: {e}")
+                await self.websocket.send(json.dumps({
+                    "type": "face_result",
+                    "msg_id": f"face_{int(time.time() * 1000)}",
+                    "result": "no_face",
+                    "user_id": None,
+                    "access": {"granted": False, "reason": "unauthorized_user"}
+                }))
+                return
+            
+            # 执行人脸识别
+            result = face_service.recognize(jpeg_data)
+            
+            # 检查权限
+            access_granted = False
+            deny_reason = None
+            
+            if result.result == "known" and result.person:
+                access_granted, deny_reason = face_service.check_permission(result.person.id)
+            
+            # 生成问候语
+            greeting = face_service.generate_greeting(result, access_granted, deny_reason)
+            
+            # 保存到访记录
+            visit_id = face_service.save_visit_record(result, access_granted, deny_reason, jpeg_data)
+            
+            # 构建响应（符合 v5.0 协议：face_result）
+            access_reason = "authorized_user" if access_granted else (deny_reason or "unauthorized_user")
+            response = {
+                "type": "face_result",
+                "msg_id": f"face_{int(time.time() * 1000)}",
+                "result": result.result,
+                "user_id": result.person.id if result.person else None,
+                "access": {
+                    "granted": access_granted,
+                    "reason": access_reason
+                }
+            }
+            
+            # 缓存识别结果，供 logReportHandler 填充 face 开锁日志的 uid
+            self.last_face_result = {
+                "ts": int(time.time() * 1000),
+                "result": result.result,
+                "user_id": result.person.id if result.person else None,
+                "person_name": result.person.name if result.person else None,
+                "access_granted": access_granted
+            }
+            
+            # 发送 JSON 响应
+            await self.websocket.send(json.dumps(response))
+            self.logger.bind(tag=TAG).info(f"响应内容: {response}")
+            # 发送 TTS 语音（如果有问候语）
+            if greeting and hasattr(self, 'tts') and self.tts:
+                from core.providers.tts.dto.dto import ContentType, TTSMessageDTO, SentenceType
+                sentence_id = str(uuid.uuid4().hex)
+                self.tts.tts_text_queue.put(
+                    TTSMessageDTO(
+                        sentence_id=sentence_id,
+                        sentence_type=SentenceType.FIRST,
+                        content_type=ContentType.TEXT,
+                        content=greeting
+                    )
+                )
+                self.tts.tts_text_queue.put(
+                    TTSMessageDTO(
+                        sentence_id=sentence_id,
+                        sentence_type=SentenceType.LAST,
+                        content_type=ContentType.ACTION,
+                    )
+                )
+            
+            # 推送通知给 App（含图片数据）
+            try:
+                import base64
+                manager = ConnectionManager.get_instance()
+                app_conns = manager.get_app_conns(self.device_id)
+                
+                if app_conns:
+                    notification = {
+                        "type": "visit_notification",
+                        "ts": int(time.time() * 1000),
+                        "data": {
+                            "visit_id": visit_id,
+                            "person_id": result.person.id if result.person else None,
+                            "person_name": result.person.name if result.person else "陌生人",
+                            "relation": result.person.relation_type if result.person else None,
+                            "result": result.result,
+                            "access_granted": access_granted,
+                            "image": base64.b64encode(jpeg_data).decode() if jpeg_data else None,
+                            "image_path": None  # 二进制接口暂不保存图片
+                        }
+                    }
+                    msg = json.dumps(notification)
+                    for app_conn in app_conns:
+                        if app_conn.websocket:
+                            await app_conn.websocket.send(msg)
+            except Exception as e:
+                self.logger.bind(tag=TAG).error(f"推送通知失败: {e}")
+            
+            self.logger.bind(tag=TAG).info(
+                f"人脸识别完成: result={result.result}, access={access_granted}"
+            )
+            
+        except Exception as e:
+            self.logger.bind(tag=TAG).error(f"处理二进制人脸识别请求失败: {e}")
+            await self.websocket.send(json.dumps({
+                "type": "face_result",
+                "msg_id": f"face_{int(time.time() * 1000)}",
+                "result": "error",
+                "user_id": None,
+                "access": {"granted": False, "reason": "unauthorized_user"}
+            }))
+    
+    async def _forward_to_apps(self, data: bytes):
+        """转发数据到所有关联的 App（将 opus 解码为 PCM 后发送）
+        
+        Args:
+            data: 要转发的原始数据（ESP32 发送的 opus 音频）
         """
         try:
             manager = ConnectionManager.get_instance()
@@ -295,19 +443,77 @@ class ConnectionHandler:
             if not app_conns:
                 return
             
-            # 广播给所有 App
+            # 初始化 opus 解码器（延迟初始化，16kHz 单声道）
+            if not hasattr(self, "_opus_decoder_for_app"):
+                self._opus_decoder_for_app = opuslib_next.Decoder(16000, 1)
+            
+            # 将 opus 解码为 PCM（16kHz，单声道，960 采样点 = 60ms）
+            try:
+                pcm_data = self._opus_decoder_for_app.decode(data, 960)
+            except opuslib_next.OpusError as e:
+                self.logger.bind(tag=TAG).error(f"opus 解码失败: {e}")
+                return
+            
+            # 广播 PCM 数据给所有 App
             for app_conn in app_conns:
                 if app_conn.websocket:
-                    await app_conn.websocket.send(data)
-            
-            # 调试已关闭：监控模式音频直接转发给 App，不送入 ASR
+                    await app_conn.websocket.send(pcm_data)
             
             self.logger.bind(tag=TAG).debug(
-                f"转发数据到 {len(app_conns)} 个 App: {len(data)} bytes"
+                f"转发 PCM 数据到 {len(app_conns)} 个 App: {len(pcm_data)} bytes"
             )
             
         except Exception as e:
             self.logger.bind(tag=TAG).error(f"转发数据到 App 失败: {e}")
+
+    async def _handle_monitor_data(self, message: bytes, msg_type: int):
+        """处理监控模式下的音视频数据
+        
+        Args:
+            message: 二进制数据（BinaryProtocol2 格式）
+            msg_type: 消息类型（0=音频/视频，根据 reserved 区分）
+        """
+        try:
+            # 转发给 App
+            await self._forward_to_apps(message)
+            
+            # 如果启用了录像，添加帧到录像器
+            if hasattr(self, "video_recorder") and self.video_recorder:
+                if self.video_recorder.is_recording(self.device_id):
+                    # 解析 BinaryProtocol2 头部
+                    if len(message) >= 16:
+                        reserved = int.from_bytes(message[4:8], 'big')
+                        timestamp = int.from_bytes(message[8:12], 'big')
+                        payload_size = int.from_bytes(message[12:16], 'big')
+                        payload = message[16:16 + payload_size]
+                        
+                        if msg_type == 0 and reserved != 0:
+                            # 视频帧（reserved 包含分辨率）
+                            width = (reserved >> 16) & 0xFFFF
+                            height = reserved & 0xFFFF
+                            self.video_recorder.add_video_frame(
+                                device_id=self.device_id,
+                                jpeg_data=payload,
+                                timestamp=timestamp,
+                                width=width,
+                                height=height
+                            )
+                        elif msg_type == 0 and reserved == 0:
+                            # 音频帧（需要解码 opus 为 PCM）
+                            if not hasattr(self, "_opus_decoder_for_record"):
+                                self._opus_decoder_for_record = opuslib_next.Decoder(16000, 1)
+                            try:
+                                pcm_data = self._opus_decoder_for_record.decode(payload, 960)
+                                self.video_recorder.add_audio_frame(
+                                    device_id=self.device_id,
+                                    pcm_data=pcm_data,
+                                    timestamp=timestamp
+                                )
+                            except Exception:
+                                pass  # 忽略音频解码错误
+                                
+        except Exception as e:
+            self.logger.bind(tag=TAG).error(f"处理监控数据失败: {e}")
 
     async def _process_mqtt_audio_message(self, message):
         """
@@ -1034,13 +1240,18 @@ class ConnectionHandler:
         self.client_is_speaking = False
         self.logger.bind(tag=TAG).debug(f"清除服务端讲话状态")
 
-    async def close(self, ws=None):
-        """资源清理方法"""
+    async def close(self, ws=None, reason: str = "connection_closed"):
+        """资源清理方法
+        
+        Args:
+            ws: WebSocket 连接
+            reason: 断开原因（connection_closed/timeout/error）
+        """
         try:
-            # 从 ConnectionManager 注销
+            # 从 ConnectionManager 注销，并通知 App 设备下线
             if self.device_id:
                 manager = ConnectionManager.get_instance()
-                manager.unregister_esp32(self.device_id)
+                manager.unregister_esp32(self.device_id, reason=reason)
             
             # 清理音频缓冲区
             if hasattr(self, "audio_buffer"):

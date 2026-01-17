@@ -84,36 +84,43 @@ class FaceService:
 
     # ==================== 图像解析 ====================
     
-    def parse_image(self, image_data: str) -> bytes:
+    def parse_image(self, image_data: bytes) -> bytes:
         """解析 BinaryProtocol2 格式的图像数据
         
         Args:
-            image_data: base64 编码的 BinaryProtocol2 格式数据
+            image_data: BinaryProtocol2 格式的原始 bytes 数据（ESP32 直接发送二进制，无 base64 编码）
             
         Returns:
             JPEG 图像的原始 bytes
         """
-        # base64 解码
-        raw_data = base64.b64decode(image_data)
+        # ESP32 直接发送二进制数据，无需 base64 解码
+        raw_data = image_data
         
-        # BinaryProtocol2 格式：
-        # - version: 1 byte
-        # - type: 1 byte  
-        # - reserved: 2 bytes
-        # - timestamp: 4 bytes
-        # - payload: 剩余数据
+        # BinaryProtocol2 格式（大端序）：
+        # - version: uint16_t (2 bytes)
+        # - type: uint16_t (2 bytes)
+        # - width: uint16_t (2 bytes) - 图像宽度
+        # - height: uint16_t (2 bytes) - 图像高度
+        # - timestamp: uint32_t (4 bytes)
+        # - payload_size: uint32_t (4 bytes)
+        # - payload: uint8_t[] (变长)
+        # 协议头总长度：16 bytes
         
-        if len(raw_data) < 8:
+        HEADER_SIZE = 16
+        
+        if len(raw_data) < HEADER_SIZE:
             raise ValueError("数据长度不足，无法解析 BinaryProtocol2 协议")
         
-        # 解析协议头
-        version = raw_data[0]
-        msg_type = raw_data[1]
-        # reserved = raw_data[2:4]
-        # timestamp = struct.unpack('>I', raw_data[4:8])[0]
+        # 解析协议头（大端序）
+        # version = struct.unpack('>H', raw_data[0:2])[0]
+        # type = struct.unpack('>H', raw_data[2:4])[0]
+        # width = struct.unpack('>H', raw_data[4:6])[0]
+        # height = struct.unpack('>H', raw_data[6:8])[0]
+        # timestamp = struct.unpack('>I', raw_data[8:12])[0]
+        payload_size = struct.unpack('>I', raw_data[12:16])[0]
         
         # 提取 JPEG payload
-        jpeg_data = raw_data[8:]
+        jpeg_data = raw_data[HEADER_SIZE:HEADER_SIZE + payload_size]
         
         # 验证 JPEG 格式（JPEG 文件以 0xFFD8 开头）
         if len(jpeg_data) < 2 or jpeg_data[0:2] != b'\xff\xd8':

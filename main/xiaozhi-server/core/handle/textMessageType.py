@@ -12,3 +12,21 @@ class TextMessageType(Enum):
     SYSTEM = "system"
     FACE_RECOGNITION = "face_recognition"
     FACE_MANAGEMENT = "face_management"
+    
+    # ESP32 智能门锁上报类型
+    STATUS_REPORT = "status_report"        # 传感器状态上报
+    EVENT_REPORT = "event_report"          # 关键事件上报
+    LOG_REPORT = "log_report"              # 开锁日志上报
+    ACK = "ack"                            # ACK 响应（ESP32）
+    USER_MGMT_RESULT = "user_mgmt_result"  # 用户管理结果
+    HEARTBEAT = "heartbeat"                # 心跳请求（预留）
+    
+    # App 协议 v2.2 新增 - 数据查询与媒体下载
+    QUERY = "query"                        # 数据查询
+    MEDIA_DOWNLOAD = "media_download"      # 媒体文件下载
+    MEDIA_DOWNLOAD_CHUNK = "media_download_chunk"  # 大文件分片下载
+    
+    # App 协议 v2.2 新增 - 命令代理（App 发送，转发给 ESP32）
+    LOCK_CONTROL = "lock_control"          # 锁控命令
+    DEV_CONTROL = "dev_control"            # 设备控制命令
+    USER_MGMT = "user_mgmt"                # 用户管理命令

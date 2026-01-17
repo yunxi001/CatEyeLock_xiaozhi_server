@@ -1,6 +1,9 @@
 """
 全局连接管理器，用于管理 ESP32 和 App 的 WebSocket 连接
 """
+import json
+import time
+import asyncio
 from typing import Dict, List, Optional
 from config.logger import setup_logging
 
@@ -29,6 +32,38 @@ class ConnectionManager:
             cls._instance = ConnectionManager()
         return cls._instance
     
+    async def notify_apps_device_status(self, device_id: str, status: str, reason: str = None):
+        """通知所有关联的 App 设备状态变化
+        
+        Args:
+            device_id: 设备 ID
+            status: "online" 或 "offline"
+            reason: 下线原因（仅 offline 时有效）
+        """
+        app_conns = self.get_app_conns(device_id)
+        if not app_conns:
+            return
+        
+        notification = {
+            "type": "device_status",
+            "status": status,
+            "device_id": device_id,
+            "ts": int(time.time() * 1000)
+        }
+        
+        if status == "offline" and reason:
+            notification["reason"] = reason
+        
+        msg = json.dumps(notification)
+        
+        for app_conn in app_conns:
+            try:
+                if app_conn.websocket:
+                    await app_conn.websocket.send(msg)
+                    self.logger.bind(tag=TAG).debug(f"已通知 App 设备{status}: {device_id}")
+            except Exception as e:
+                self.logger.bind(tag=TAG).warning(f"通知 App 设备状态失败: {e}")
+    
     def register_esp32(self, device_id: str, conn) -> None:
         """注册 ESP32 连接
         
@@ -38,6 +73,9 @@ class ConnectionManager:
         """
         self.esp32_connections[device_id] = conn
         self.logger.bind(tag=TAG).info(f"ESP32 连接已注册: {device_id}")
+        
+        # 通知关联的 App 设备上线
+        asyncio.create_task(self.notify_apps_device_status(device_id, "online"))
     
     def register_app(self, device_id: str, conn) -> None:
         """注册 App 连接
@@ -53,15 +91,19 @@ class ConnectionManager:
             f"App 连接已注册: {device_id}, 当前连接数: {len(self.app_connections[device_id])}"
         )
     
-    def unregister_esp32(self, device_id: str) -> None:
+    def unregister_esp32(self, device_id: str, reason: str = "connection_lost") -> None:
         """注销 ESP32 连接
         
         Args:
             device_id: 设备唯一标识符
+            reason: 断开原因（connection_lost/device_disconnect/server_kick/timeout）
         """
         if device_id in self.esp32_connections:
             del self.esp32_connections[device_id]
-            self.logger.bind(tag=TAG).info(f"ESP32 连接已注销: {device_id}")
+            self.logger.bind(tag=TAG).info(f"ESP32 连接已注销: {device_id}, 原因: {reason}")
+            
+            # 通知关联的 App 设备下线
+            asyncio.create_task(self.notify_apps_device_status(device_id, "offline", reason))
     
     def unregister_app(self, device_id: str, conn) -> None:
         """注销 App 连接

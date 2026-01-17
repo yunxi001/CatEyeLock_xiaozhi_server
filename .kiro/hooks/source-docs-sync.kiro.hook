@@ -1,17 +1,13 @@
 {
   "enabled": true,
   "name": "源代码文档同步",
-  "description": "监听项目中的源代码文件（Java、Python、TypeScript、Vue、JavaScript等），当文件被修改或新增时，自动提示更新README或docs文件夹中的文档，记录变更内容",
+  "description": "监听项目中的源代码文件（Python、TypeScript等），当文件被修改或新增时，自动提示更新README或docs文件夹中的文档，记录变更内容",
   "version": "1",
   "when": {
     "type": "fileEdited",
     "patterns": [
-      "**/*.java",
       "**/*.py",
       "**/*.ts",
-      "**/*.vue",
-      "**/*.js",
-      "**/*.jsx",
       "**/*.tsx"
     ]
   },

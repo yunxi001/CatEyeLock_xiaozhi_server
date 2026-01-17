@@ -1,7 +1,13 @@
 """
 App 端连接处理器
+
+协议版本: v2.2
+- 支持 app_id 身份标识
+- 支持 server_ack 消息确认机制
+- 支持 seq_id 防重放
 """
 import json
+import time
 import asyncio
 import websockets
 from typing import Dict, Any
@@ -9,17 +15,22 @@ from config.logger import setup_logging
 from core.connection_manager import ConnectionManager
 from core.handle.textHandle import handleTextMessage
 from core.utils.opus_encoder_utils import OpusEncoderUtils
+from core.utils.seq_id_cache import SeqIdCache
 
 TAG = __name__
 
 
 class AppConnectionHandler:
     """App 端连接处理器"""
+    
+    # 类级别的 seq_id 缓存（所有连接共享）
+    _seq_id_cache = SeqIdCache(max_size=100)
 
     def __init__(self, config: Dict[str, Any]):
         self.config = config
         self.websocket = None
         self.device_id = None
+        self.app_id = None  # App 用户标识
         self.authenticated = False
         self.logger = setup_logging()
         self.client_type = "app"
@@ -88,8 +99,15 @@ class AppConnectionHandler:
                 await self._send_error(f"设备 {device_id} 不在线")
                 return False
 
+            # 提取 app_id
+            app_id = msg_json.get("app_id")
+            if not app_id:
+                await self._send_error("缺少 app_id")
+                return False
+
             # 认证成功
             self.device_id = device_id
+            self.app_id = app_id
             self.authenticated = True
 
             # 注册到 ConnectionManager
@@ -110,7 +128,7 @@ class AppConnectionHandler:
                 )
             )
 
-            self.logger.bind(tag=TAG).info(f"App 认证成功: device_id={device_id}")
+            self.logger.bind(tag=TAG).info(f"App 认证成功: device_id={device_id}, app_id={app_id}")
             return True
 
         except json.JSONDecodeError:
@@ -138,17 +156,30 @@ class AppConnectionHandler:
             await self._handle_binary_message(message)
 
     async def _handle_text_message(self, message: str):
-        """处理文本消息"""
+        """处理文本消息
+        
+        协议 v2.2:
+        - 所有消息统一走 Handler 处理
+        - 支持 seq_id 防重放
+        - 返回 server_ack 确认
+        """
         try:
             msg_json = json.loads(message)
-
-            # 检查 forward 字段
-            if msg_json.get("forward") == True:
-                await self._forward_to_esp32(msg_json)
-            else:
-                # 其他消息类型处理（如系统命令、查询状态等）
-                # 使用统一的文本消息处理器
-                await handleTextMessage(self, message)
+            seq_id = msg_json.get("seq_id")
+            
+            # 如果有 seq_id，进行防重放检查并返回 server_ack
+            if seq_id:
+                # 检查是否重复消息
+                if not self._seq_id_cache.check_and_add(self.app_id, seq_id):
+                    await self._send_server_ack(seq_id, code=5, msg="重复消息")
+                    self.logger.bind(tag=TAG).debug(f"忽略重复消息: seq_id={seq_id}")
+                    return
+                
+                # 先发送 ACK 确认收到
+                await self._send_server_ack(seq_id, code=0, msg="已接收")
+            
+            # 统一使用 Handler 处理消息
+            await handleTextMessage(self, message)
 
         except json.JSONDecodeError:
             self.logger.bind(tag=TAG).error(f"解析 App 消息失败: {message}")
@@ -203,29 +234,24 @@ class AppConnectionHandler:
         except Exception as e:
             self.logger.bind(tag=TAG).error(f"处理 App 音频失败: {e}")
 
-    async def _forward_to_esp32(self, msg_json: Dict[str, Any]):
-        """转发消息到 ESP32"""
+    async def _send_server_ack(self, seq_id: str, code: int, msg: str):
+        """发送服务器 ACK 确认
+        
+        Args:
+            seq_id: App 发送的消息序列号
+            code: 状态码（0=成功, 1=设备离线, 2=参数错误, 3=未认证, 4=内部错误, 5=重复消息）
+            msg: 状态描述
+        """
         try:
-            # 删除 forward 字段
-            if "forward" in msg_json:
-                del msg_json["forward"]
-
-            forward_msg = json.dumps(msg_json, ensure_ascii=False)
-
-            # 获取 ESP32 连接
-            manager = ConnectionManager.get_instance()
-            esp32_conn = manager.get_esp32_conn(self.device_id)
-
-            if esp32_conn and esp32_conn.websocket:
-                await esp32_conn.websocket.send(forward_msg)
-                self.logger.bind(tag=TAG).debug(f"转发消息到 ESP32: {forward_msg}")
-            else:
-                self.logger.bind(tag=TAG).warning(
-                    f"ESP32 连接不可用: {self.device_id}"
-                )
-
+            await self.websocket.send(json.dumps({
+                "type": "server_ack",
+                "seq_id": seq_id,
+                "code": code,
+                "msg": msg,
+                "ts": int(time.time() * 1000)
+            }))
         except Exception as e:
-            self.logger.bind(tag=TAG).error(f"转发消息到 ESP32 失败: {e}")
+            self.logger.bind(tag=TAG).error(f"发送 server_ack 失败: {e}")
 
     async def _cleanup(self):
         """清理资源"""

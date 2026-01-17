@@ -112,8 +112,6 @@ ESP32 拍照后，发送图像数据请求人脸识别。图像格式与视频�
 }
 ```
 
-注：image 字段包含 BinaryProtocol2 协议头 + JPEG 数据，整体进行 base64 编码。服务器需要先 base64 解码，再解析 BinaryProtocol2 协议提取 JPEG 图像。
-
 #### 3.1.2 接收识别结果
 
 服务器返回识别结果，包含 TTS 语音数据和 JSON 文本。

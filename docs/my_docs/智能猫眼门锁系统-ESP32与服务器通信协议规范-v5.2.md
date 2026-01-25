@@ -391,10 +391,14 @@ STM32
 
 #### 3.4.2 识别结果 (Server → Device)
 
+> **重要说明**：face_result 是服务器主动推送的识别结果，不是用户发起的命令。
+> - **不需要** seq_id 字段
+> - **不需要** esp32_ack 和 ack 两级确认
+> - 开锁结果通过 log_report 上报
+
 ```json
 {
     "type": "face_result",
-    "seq_id": "1702234567890_0",
     "result": "known",
     "user_id": 5,
     "access": {
@@ -700,7 +704,7 @@ STM32
 
 ## 4. 数据流示意图
 
-### 4.1 人脸识别流程（含两级确认）【v5.1 更新】
+### 4.1 人脸识别流程【v5.2 更新】
 
 ```
 ┌─────────┐         ┌─────────┐         ┌─────────┐
@@ -718,12 +722,8 @@ STM32
      │                   │                   │ AI 识别
      │                   │                   │
      │                   │ JSON: face_result │
-     │                   │ (seq_id=xxx)      │
+     │                   │ (无 seq_id)       │
      │                   │<──────────────────│
-     │                   │                   │
-     │                   │ JSON: esp32_ack   │
-     │                   │ (seq_id=xxx)      │
-     │                   │──────────────────>│
      │                   │                   │
      │ UART: CMD_LOCK    │                   │
      │ (开锁)            │                   │
@@ -731,10 +731,6 @@ STM32
      │                   │                   │
      │ UART: ACK_OK      │                   │
      │──────────────────>│                   │
-     │                   │                   │
-     │                   │ JSON: ack         │
-     │                   │ (seq_id=xxx)      │
-     │                   │──────────────────>│
      │                   │                   │
      │ UART: RPT_UNLOCK  │                   │
      │ (开锁日志)        │                   │
@@ -751,6 +747,8 @@ STM32
      │                   │──────────────────>│
      │                   │                   │
 ```
+
+> **说明**：face_result 不需要两级确认，因为它是服务器主动推送的识别结果，不是用户命令。开锁成功与否通过 log_report 上报。
 
 ### 4.2 监控模式流程
 
@@ -854,7 +852,7 @@ STM32
 | 硬件控制 | `Application::HandleSmartLockJsonMessage()` | ✅ |
 | 用户管理 | `Application::HandleSmartLockJsonMessage()` | ✅ |
 | 查询命令【v5.2 新增】 | `Application::HandleSmartLockJsonMessage()` | ✅ |
-| face_result 两级确认【v5.2 新增】 | `Application::HandleSmartLockJsonMessage()` | ✅ |
+| face_result 处理【v5.2 更新】 | `Application::HandleSmartLockJsonMessage()` | ✅ |
 | 心跳机制 | `WebsocketProtocol::SendHeartbeat()` | ✅ (预留) |
 | seq_id 防重放 | `WebsocketProtocol::IsDuplicateMsgId()` | ✅ |
 | 待处理命令队列【v5.1 新增】 | `Application::pending_commands_` | ✅ |
@@ -866,6 +864,7 @@ STM32
 | 功能 | 说明 |
 |------|------|
 | 两级确认 | esp32_ack（收到）+ ack（完成），支持命令追溯 |
+| face_result | 服务器主动推送，不需要 seq_id 和两级确认【v5.2 更新】 |
 | 状态上报 | 仅在状态变化时上报（由 STM32 触发） |
 | 心跳机制 | 已实现发送方法，间隔30秒，暂不启用（预留功能） |
 | 待处理命令 | 按 UART TYPE 索引，支持超时清理 |
@@ -900,7 +899,7 @@ STM32
 
 | 消息类型 | 说明 | 携带 seq_id |
 |----------|------|-------------|
-| `face_result` | 人脸识别结果 | ✅ |
+| `face_result` | 人脸识别结果 | ❌ |
 | `lock_control` | 锁控命令 | ✅ |
 | `dev_control` | 硬件控制 | ✅ |
 | `query` | 查询命令【v5.2 新增】 | ✅ |
@@ -914,7 +913,7 @@ STM32
 
 | 版本 | 日期 | 变更说明 |
 |------|------|----------|
-| v5.2 | 2026-01-16 | 新增 query 消息处理（sensors/status）；face_result 添加两级确认机制和 seq_id 支持 |
+| v5.2 | 2026-01-17 | 新增 query 消息处理（sensors/status）；明确 face_result 不需要 seq_id 和两级确认 |
 | v5.1 | 2026-01-16 | 两级确认机制（esp32_ack + ack）；统一错误码；log_report 支持 status/lock_time；新增 door_opened_report、password_report；event_report 新增 lock_status 事件 |
 | v5.0 | 2024-12-12 | 整合协议，与服务器协议对齐，统一 method 取值 |
 | v4.0 | 2024-12-09 | 新增 msg_id/ACK 机制、用户管理闭环 |
@@ -925,4 +924,4 @@ STM32
 ---
 
 **文档维护者：** 毕业设计项目组  
-**最后更新：** 2026-01-16
+**最后更新：** 2026-01-17

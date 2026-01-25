@@ -21,6 +21,11 @@ class TextMessageType(Enum):
     USER_MGMT_RESULT = "user_mgmt_result"  # 用户管理结果
     HEARTBEAT = "heartbeat"                # 心跳请求（预留）
     
+    # v5.2 协议新增消息类型
+    ESP32_ACK = "esp32_ack"                # ESP32 第一级确认（命令已收到）
+    DOOR_OPENED_REPORT = "door_opened_report"  # 开门日志上报
+    PASSWORD_REPORT = "password_report"    # 密码查询结果上报
+    
     # App 协议 v2.2 新增 - 数据查询与媒体下载
     QUERY = "query"                        # 数据查询
     MEDIA_DOWNLOAD = "media_download"      # 媒体文件下载

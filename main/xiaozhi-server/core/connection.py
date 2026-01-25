@@ -84,6 +84,14 @@ class ConnectionHandler:
         self.chat_history_conf = 0
         self.audio_format = "opus"
 
+        # 设备状态信息（用于推送给 App）
+        self.device_state = {
+            "light": {"status": "unknown"},  # 灯状态
+            "door": {"status": "unknown", "locked": None},  # 门状态
+            "sensors": {},  # 传感器数据
+            "last_update": 0  # 最后更新时间
+        }
+
         # 客户端状态相关
         self.client_abort = False
         self.client_is_speaking = False
@@ -320,7 +328,6 @@ class ConnectionHandler:
                 self.logger.bind(tag=TAG).error(f"图像解析失败: {e}")
                 await self.websocket.send(json.dumps({
                     "type": "face_result",
-                    "msg_id": f"face_{int(time.time() * 1000)}",
                     "result": "no_face",
                     "user_id": None,
                     "access": {"granted": False, "reason": "unauthorized_user"}
@@ -343,11 +350,11 @@ class ConnectionHandler:
             # 保存到访记录
             visit_id = face_service.save_visit_record(result, access_granted, deny_reason, jpeg_data)
             
-            # 构建响应（符合 v5.0 协议：face_result）
+            # 构建响应（符合 v5.2 协议：face_result）
+            # 注意：face_result 是主动上报，不携带 seq_id
             access_reason = "authorized_user" if access_granted else (deny_reason or "unauthorized_user")
             response = {
                 "type": "face_result",
-                "msg_id": f"face_{int(time.time() * 1000)}",
                 "result": result.result,
                 "user_id": result.person.id if result.person else None,
                 "access": {
@@ -424,17 +431,19 @@ class ConnectionHandler:
             self.logger.bind(tag=TAG).error(f"处理二进制人脸识别请求失败: {e}")
             await self.websocket.send(json.dumps({
                 "type": "face_result",
-                "msg_id": f"face_{int(time.time() * 1000)}",
                 "result": "error",
                 "user_id": None,
                 "access": {"granted": False, "reason": "unauthorized_user"}
             }))
     
     async def _forward_to_apps(self, data: bytes):
-        """转发数据到所有关联的 App（将 opus 解码为 PCM 后发送）
+        """转发监控数据到所有关联的 App
+        
+        - 音频帧：opus 解码为 PCM 后转发
+        - 视频帧：JPEG 数据直接转发（保持 BinaryProtocol2 格式）
         
         Args:
-            data: 要转发的原始数据（ESP32 发送的 opus 音频）
+            data: BinaryProtocol2 格式的完整帧数据（包含 16 字节头部 + payload）
         """
         try:
             manager = ConnectionManager.get_instance()
@@ -443,15 +452,100 @@ class ConnectionHandler:
             if not app_conns:
                 return
             
+            # 解析 BinaryProtocol2 头部
+            if len(data) < 16:
+                self.logger.bind(tag=TAG).warning(f"数据长度不足 16 字节，无法解析协议头: {len(data)}")
+                return
+            
+            version = int.from_bytes(data[0:2], 'big')
+            msg_type = int.from_bytes(data[2:4], 'big')
+            reserved = int.from_bytes(data[4:8], 'big')
+            timestamp = int.from_bytes(data[8:12], 'big')
+            payload_size = int.from_bytes(data[12:16], 'big')
+            
+            # 区分音频和视频帧
+            is_audio = (reserved == 0)
+            is_video = (reserved != 0)
+            
+            # 调试日志（只打印前几帧）
+            if not hasattr(self, "_monitor_frame_count"):
+                self._monitor_frame_count = 0
+                self._monitor_audio_count = 0
+                self._monitor_video_count = 0
+            
+            self._monitor_frame_count += 1
+            
+            # 处理视频帧：直接转发完整的 BinaryProtocol2 帧
+            if is_video:
+                self._monitor_video_count += 1
+                if self._monitor_video_count <= 2:
+                    width = (reserved >> 16) & 0xFFFF
+                    height = reserved & 0xFFFF
+                    self.logger.bind(tag=TAG).info(
+                        f"视频帧 #{self._monitor_video_count}: {width}x{height}, "
+                        f"payload={payload_size} bytes, 转发给 {len(app_conns)} 个 App"
+                    )
+                
+                # 直接转发完整帧给所有 App
+                for app_conn in app_conns:
+                    if app_conn.websocket:
+                        await app_conn.websocket.send(data)
+                return
+            
+            # 处理音频帧：解码 opus 为 PCM 后转发
+            if not is_audio:
+                return
+            
+            self._monitor_audio_count += 1
+            if self._monitor_audio_count <= 3:
+                self.logger.bind(tag=TAG).info(
+                    f"音频帧 #{self._monitor_audio_count}: payload_size={payload_size}, "
+                    f"total_len={len(data)}, header_hex={data[:16].hex()}"
+                )
+            
+            # 验证并提取 opus payload
+            if payload_size > len(data) - 16:
+                self.logger.bind(tag=TAG).warning(
+                    f"音频帧 payload_size 异常: 声称 {payload_size} 字节，实际 {len(data) - 16} 字节"
+                )
+                opus_payload = data[16:]
+            else:
+                opus_payload = data[16:16 + payload_size]
+            
             # 初始化 opus 解码器（延迟初始化，16kHz 单声道）
             if not hasattr(self, "_opus_decoder_for_app"):
                 self._opus_decoder_for_app = opuslib_next.Decoder(16000, 1)
+                self._opus_decode_error_count = 0  # 错误计数器
+                self._opus_decode_last_error_time = 0  # 上次错误时间
             
-            # 将 opus 解码为 PCM（16kHz，单声道，960 采样点 = 60ms）
+            # 将 opus payload 解码为 PCM（16kHz，单声道，960 采样点 = 60ms）
             try:
-                pcm_data = self._opus_decoder_for_app.decode(data, 960)
+                pcm_data = self._opus_decoder_for_app.decode(opus_payload, 960)
+                # 解码成功，重置错误计数
+                self._opus_decode_error_count = 0
             except opuslib_next.OpusError as e:
-                self.logger.bind(tag=TAG).error(f"opus 解码失败: {e}")
+                # 限制错误日志频率，避免刷屏
+                import time
+                current_time = time.time()
+                self._opus_decode_error_count += 1
+                
+                # 每 5 秒或每 100 次错误才记录一次
+                if (current_time - self._opus_decode_last_error_time > 5.0 or 
+                    self._opus_decode_error_count % 100 == 1):
+                    self.logger.bind(tag=TAG).warning(
+                        f"opus 解码失败 (已累计 {self._opus_decode_error_count} 次): {e}, "
+                        f"payload 长度: {len(opus_payload)} bytes"
+                    )
+                    self._opus_decode_last_error_time = current_time
+                
+                # 尝试重置解码器（可能解码器状态损坏）
+                if self._opus_decode_error_count > 10:
+                    try:
+                        self._opus_decoder_for_app = opuslib_next.Decoder(16000, 1)
+                        self._opus_decode_error_count = 0
+                        self.logger.bind(tag=TAG).info("已重置 opus 解码器")
+                    except Exception:
+                        pass
                 return
             
             # 广播 PCM 数据给所有 App
@@ -1438,3 +1532,83 @@ class ConnectionHandler:
                 tool_calls_list[tool_index]["name"] = tool_call.function.name
             if tool_call.function.arguments:
                 tool_calls_list[tool_index]["arguments"] += tool_call.function.arguments
+
+    async def update_device_state(self, state_type: str, state_data: dict):
+        """更新设备状态并推送给所有关联的 App
+        
+        Args:
+            state_type: 状态类型（light/door/sensor）
+            state_data: 状态数据
+        """
+        try:
+            # 更新本地状态
+            if state_type == "light":
+                self.device_state["light"].update(state_data)
+            elif state_type == "door":
+                self.device_state["door"].update(state_data)
+            elif state_type == "sensor":
+                sensor_name = state_data.get("name")
+                if sensor_name:
+                    self.device_state["sensors"][sensor_name] = state_data
+            
+            self.device_state["last_update"] = int(time.time() * 1000)
+            
+            self.logger.bind(tag=TAG).info(
+                f"设备状态已更新: device_id={self.device_id}, "
+                f"state_type={state_type}, state_data={state_data}"
+            )
+            
+            # 推送给所有关联的 App
+            manager = ConnectionManager.get_instance()
+            app_conns = manager.get_app_conns(self.device_id)
+            
+            if not app_conns:
+                self.logger.bind(tag=TAG).debug(
+                    f"无需推送状态（无关联 App）: device_id={self.device_id}, "
+                    f"state_type={state_type}"
+                )
+                return
+            
+            notification = {
+                "type": "device_state_update",
+                "ts": self.device_state["last_update"],
+                "state_type": state_type,
+                "state_data": state_data
+            }
+            msg = json.dumps(notification)
+            
+            self.logger.bind(tag=TAG).info(
+                f"开始推送状态更新: device_id={self.device_id}, "
+                f"state_type={state_type}, app_count={len(app_conns)}"
+            )
+            
+            success_count = 0
+            fail_count = 0
+            
+            for app_conn in app_conns:
+                try:
+                    if app_conn.websocket:
+                        await app_conn.websocket.send(msg)
+                        success_count += 1
+                        self.logger.bind(tag=TAG).debug(
+                            f"已推送状态到 App: device_id={self.device_id}, "
+                            f"app_id={getattr(app_conn, 'app_id', 'unknown')}, "
+                            f"state_type={state_type}"
+                        )
+                except Exception as e:
+                    fail_count += 1
+                    self.logger.bind(tag=TAG).warning(
+                        f"推送设备状态到 App 失败: device_id={self.device_id}, "
+                        f"app_id={getattr(app_conn, 'app_id', 'unknown')}, error={e}"
+                    )
+            
+            self.logger.bind(tag=TAG).info(
+                f"状态推送完成: device_id={self.device_id}, state_type={state_type}, "
+                f"成功={success_count}, 失败={fail_count}"
+            )
+            
+        except Exception as e:
+            self.logger.bind(tag=TAG).error(
+                f"更新设备状态失败: device_id={self.device_id}, "
+                f"state_type={state_type}, error={e}"
+            )

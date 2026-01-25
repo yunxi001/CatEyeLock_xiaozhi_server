@@ -93,12 +93,6 @@ class AppConnectionHandler:
                 await self._send_error("缺少 device_id")
                 return False
 
-            # 验证对应的 ESP32 是否在线
-            manager = ConnectionManager.get_instance()
-            if not manager.is_esp32_online(device_id):
-                await self._send_error(f"设备 {device_id} 不在线")
-                return False
-
             # 提取 app_id
             app_id = msg_json.get("app_id")
             if not app_id:
@@ -111,24 +105,36 @@ class AppConnectionHandler:
             self.authenticated = True
 
             # 注册到 ConnectionManager
+            manager = ConnectionManager.get_instance()
             manager.register_app(device_id, self)
 
-            # 获取 ESP32 连接信息
+            # 检查 ESP32 是否在线，并获取设备信息
+            is_online = manager.is_esp32_online(device_id)
             esp32_conn = manager.get_esp32_conn(device_id)
-            current_mode = getattr(esp32_conn, "current_mode", "normal")
+            current_mode = getattr(esp32_conn, "current_mode", "normal") if esp32_conn else "normal"
 
-            # 发送成功响应
+            # 发送成功响应（无论设备是否在线都允许连接）
             await self.websocket.send(
                 json.dumps(
                     {
                         "type": "hello",
                         "status": "ok",
-                        "device_info": {"online": True, "mode": current_mode},
+                        "device_info": {
+                            "online": is_online,
+                            "mode": current_mode
+                        },
                     }
                 )
             )
 
-            self.logger.bind(tag=TAG).info(f"App 认证成功: device_id={device_id}, app_id={app_id}")
+            self.logger.bind(tag=TAG).info(
+                f"App 认证成功: device_id={device_id}, app_id={app_id}, "
+                f"设备在线={is_online}"
+            )
+
+            # 认证成功后，主动推送设备状态信息
+            await self._push_initial_device_status(is_online, esp32_conn)
+
             return True
 
         except json.JSONDecodeError:
@@ -148,6 +154,62 @@ class AppConnectionHandler:
         except Exception as e:
             self.logger.bind(tag=TAG).error(f"发送错误响应失败: {e}")
 
+    async def _push_initial_device_status(self, is_online: bool, esp32_conn):
+        """App 连接成功后，主动推送设备状态信息
+        
+        Args:
+            is_online: 设备是否在线
+            esp32_conn: ESP32 连接对象（如果在线）
+        """
+        try:
+            # 1. 推送设备在线/离线通知
+            status_notification = {
+                "type": "device_status",
+                "status": "online" if is_online else "offline",
+                "device_id": self.device_id,
+                "ts": int(time.time() * 1000)
+            }
+            
+            if not is_online:
+                status_notification["reason"] = "device_offline"
+            
+            await self.websocket.send(json.dumps(status_notification))
+            self.logger.bind(tag=TAG).info(
+                f"已推送设备状态通知: device_id={self.device_id}, "
+                f"status={'在线' if is_online else '离线'}"
+            )
+            
+            # 2. 如果设备在线，推送详细的设备状态信息
+            if is_online and esp32_conn:
+                device_state = getattr(esp32_conn, "device_state", None)
+                
+                if device_state:
+                    # 推送完整的设备状态
+                    state_response = {
+                        "type": "device_state_full",
+                        "ts": int(time.time() * 1000),
+                        "device_id": self.device_id,
+                        "state": device_state
+                    }
+                    
+                    await self.websocket.send(json.dumps(state_response))
+                    self.logger.bind(tag=TAG).info(
+                        f"已推送完整设备状态: device_id={self.device_id}, "
+                        f"state_keys={list(device_state.keys())}"
+                    )
+                else:
+                    self.logger.bind(tag=TAG).debug(
+                        f"设备在线但暂无状态数据: device_id={self.device_id}"
+                    )
+            else:
+                # 设备离线，推送空状态或最后已知状态
+                self.logger.bind(tag=TAG).info(
+                    f"设备离线，无法推送详细状态: device_id={self.device_id}"
+                )
+                
+        except Exception as e:
+            self.logger.bind(tag=TAG).error(f"推送初始设备状态失败: {e}")
+
     async def _route_message(self, message):
         """消息路由"""
         if isinstance(message, str):
@@ -166,6 +228,7 @@ class AppConnectionHandler:
         try:
             msg_json = json.loads(message)
             seq_id = msg_json.get("seq_id")
+            msg_type = msg_json.get("type")
             
             # 如果有 seq_id，进行防重放检查并返回 server_ack
             if seq_id:
@@ -177,6 +240,12 @@ class AppConnectionHandler:
                 
                 # 先发送 ACK 确认收到
                 await self._send_server_ack(seq_id, code=0, msg="已接收")
+            
+            # 处理特殊消息类型
+            if msg_type == "get_device_status":
+                # App 请求获取设备状态
+                await self._handle_get_device_status(seq_id)
+                return
             
             # 统一使用 Handler 处理消息
             await handleTextMessage(self, message)
@@ -252,6 +321,60 @@ class AppConnectionHandler:
             }))
         except Exception as e:
             self.logger.bind(tag=TAG).error(f"发送 server_ack 失败: {e}")
+
+    async def _handle_get_device_status(self, seq_id: str = None):
+        """处理获取设备状态请求
+        
+        Args:
+            seq_id: 消息序列号（可选）
+        """
+        try:
+            manager = ConnectionManager.get_instance()
+            esp32_conn = manager.get_esp32_conn(self.device_id)
+            is_online = esp32_conn is not None
+            
+            self.logger.bind(tag=TAG).info(
+                f"处理设备状态查询: device_id={self.device_id}, "
+                f"app_id={self.app_id}, seq_id={seq_id}, 设备在线={is_online}"
+            )
+            
+            # 构建设备状态信息
+            status_data = {
+                "type": "device_status_response",
+                "ts": int(time.time() * 1000),
+                "device_id": self.device_id,
+                "online": is_online,
+            }
+            
+            if seq_id:
+                status_data["seq_id"] = seq_id
+            
+            # 如果设备在线，获取更多状态信息
+            if esp32_conn:
+                status_data["mode"] = getattr(esp32_conn, "current_mode", "normal")
+                
+                # 获取设备状态（灯、门、传感器等）
+                device_state = getattr(esp32_conn, "device_state", {})
+                status_data["state"] = device_state
+                
+                self.logger.bind(tag=TAG).info(
+                    f"设备在线，返回状态: mode={status_data['mode']}, "
+                    f"state_keys={list(device_state.keys())}"
+                )
+            else:
+                self.logger.bind(tag=TAG).info(
+                    f"设备离线，返回基本信息: device_id={self.device_id}"
+                )
+            
+            # 发送状态响应
+            await self.websocket.send(json.dumps(status_data))
+            self.logger.bind(tag=TAG).info(
+                f"已发送设备状态响应: device_id={self.device_id}, "
+                f"online={is_online}, data_size={len(json.dumps(status_data))} bytes"
+            )
+            
+        except Exception as e:
+            self.logger.bind(tag=TAG).error(f"处理设备状态请求失败: {e}")
 
     async def _cleanup(self):
         """清理资源"""

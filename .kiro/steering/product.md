@@ -12,14 +12,14 @@ inclusion: always
 
 ## 核心能力
 
-| 能力 | 说明 |
-|------|------|
-| 语音交互 | ASR 语音识别、TTS 语音合成、VAD 语音活动检测 |
-| 智能对话 | LLM 大语言模型集成 |
-| 多模态 | VLLM 视觉语言模型支持 |
-| 身份识别 | 声纹识别说话人 |
-| 物联网控制 | 插件系统扩展（天气、新闻、Home Assistant、音乐） |
-| 协议支持 | WebSocket（端口 8000）、HTTP API（端口 8003）、MCP |
+| 能力       | 说明                                               |
+| ---------- | -------------------------------------------------- |
+| 语音交互   | ASR 语音识别、TTS 语音合成、VAD 语音活动检测       |
+| 智能对话   | LLM 大语言模型集成                                 |
+| 多模态     | VLLM 视觉语言模型支持                              |
+| 身份识别   | 声纹识别说话人                                     |
+| 物联网控制 | 插件系统扩展（天气、新闻、Home Assistant、音乐）   |
+| 协议支持   | WebSocket（端口 8000）、HTTP API（端口 8003）、MCP |
 
 ## 开发原则
 
@@ -37,3 +37,5 @@ inclusion: always
 - `core/handle/`：消息处理器（音频、文本、意图等）
 - `core/providers/`：AI 服务提供者
 - `plugins_func/functions/`：插件目录
+- `docs/my_docs`：文档目录
+- `docs/completed`：已归档文档目录

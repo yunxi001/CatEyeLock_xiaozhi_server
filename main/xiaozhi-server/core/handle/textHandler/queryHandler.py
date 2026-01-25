@@ -27,7 +27,8 @@ def _get_database(conn):
     try:
         face_service = get_face_service(conn.logger)
         return face_service.db
-    except Exception:
+    except Exception as e:
+        conn.logger.bind(tag=TAG).error(f"获取数据库实例失败: {e}")
         return None
 
 
@@ -54,6 +55,7 @@ class QueryHandler(TextMessageHandler):
             "events": self._query_events,
             "unlock_logs": self._query_unlock_logs,
             "media_files": self._query_media_files,
+            "password": self._query_password,  # 新增密码查询
         }
         
         handler = handlers.get(target)
@@ -110,6 +112,10 @@ class QueryHandler(TextMessageHandler):
                 offset=offset
             )
             
+            # 检查是否有数据
+            if total == 0 and offset == 0:
+                conn.logger.bind(tag=TAG).info(f"设备 {conn.device_id} 暂无历史状态数据")
+            
             await self._send_response(conn, "status_history", {
                 "records": records,
                 "total": total,
@@ -139,6 +145,11 @@ class QueryHandler(TextMessageHandler):
                 limit=limit,
                 offset=offset
             )
+            
+            # 检查是否有数据
+            if total == 0 and offset == 0:
+                filter_msg = f"（类型: {event_type}）" if event_type else ""
+                conn.logger.bind(tag=TAG).info(f"设备 {conn.device_id} 暂无事件历史数据{filter_msg}")
             
             await self._send_response(conn, "events", {
                 "records": records,
@@ -171,6 +182,16 @@ class QueryHandler(TextMessageHandler):
                 limit=limit,
                 offset=offset
             )
+            
+            # 检查是否有数据
+            if total == 0 and offset == 0:
+                filter_parts = []
+                if method:
+                    filter_parts.append(f"方式: {method}")
+                if result is not None:
+                    filter_parts.append(f"结果: {'成功' if result == 1 else '失败'}")
+                filter_msg = f"（{', '.join(filter_parts)}）" if filter_parts else ""
+                conn.logger.bind(tag=TAG).info(f"设备 {conn.device_id} 暂无开锁日志数据{filter_msg}")
             
             await self._send_response(conn, "unlock_logs", {
                 "records": records,
@@ -206,6 +227,18 @@ class QueryHandler(TextMessageHandler):
                 offset=offset
             )
             
+            # 检查是否有数据
+            if total == 0 and offset == 0:
+                filter_parts = []
+                if file_type:
+                    filter_parts.append(f"类型: {file_type}")
+                if date_from:
+                    filter_parts.append(f"起始: {date_from}")
+                if date_to:
+                    filter_parts.append(f"结束: {date_to}")
+                filter_msg = f"（{', '.join(filter_parts)}）" if filter_parts else ""
+                conn.logger.bind(tag=TAG).info(f"设备 {conn.device_id} 暂无媒体文件数据{filter_msg}")
+            
             await self._send_response(conn, "media_files", {
                 "records": records,
                 "total": total,
@@ -216,6 +249,34 @@ class QueryHandler(TextMessageHandler):
         except Exception as e:
             conn.logger.bind(tag=TAG).error(f"查询媒体文件失败: {e}")
             await self._send_error(conn, "media_files", str(e))
+
+    async def _query_password(self, conn, data: Dict):
+        """查询设备密码（从服务器数据库读取）"""
+        try:
+            db = _get_database(conn)
+            if not db:
+                await self._send_error(conn, "password", "数据库不可用")
+                return
+            
+            # 从数据库获取密码
+            password = db.get_device_password(conn.device_id)
+            
+            if password:
+                conn.logger.bind(tag=TAG).info(
+                    f"密码查询成功: device_id={conn.device_id}, password_length={len(password)}"
+                )
+                await self._send_response(conn, "password", {
+                    "password": password
+                })
+            else:
+                conn.logger.bind(tag=TAG).warning(f"设备 {conn.device_id} 密码不存在，返回默认密码")
+                await self._send_response(conn, "password", {
+                    "password": "123456"
+                })
+            
+        except Exception as e:
+            conn.logger.bind(tag=TAG).error(f"查询密码失败: {e}")
+            await self._send_error(conn, "password", str(e))
 
     async def _send_response(self, conn, target: str, data: Any):
         """发送查询响应"""

@@ -123,20 +123,20 @@ class FaceRecognitionHandler(TextMessageHandler):
         )
 
     def _build_face_result(self, result, access_granted: bool, deny_reason: str = None) -> dict:
-        """构建符合 v5.0 协议的人脸识别响应
+        """构建符合 v5.2 协议的人脸识别响应
         
         响应格式:
         {
             "type": "face_result",
-            "msg_id": "face_xxx",
             "result": "known|unknown|no_face|error",
             "user_id": 5,
             "access": {"granted": true, "reason": "authorized_user"}
         }
+        
+        注意：face_result 是主动上报，不携带 seq_id
         """
         response = {
             "type": "face_result",
-            "msg_id": f"face_{int(time.time() * 1000)}",
             "result": result.result,
             "user_id": result.person.id if result.person else None,
             "access": {

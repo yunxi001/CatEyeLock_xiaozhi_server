@@ -31,15 +31,28 @@ class LogReportHandler(TextMessageHandler):
     async def handle(self, conn, msg_json: Dict[str, Any]) -> None:
         """处理开锁日志上报
         
-        消息格式:
+        v5.2 消息格式:
         {
             "type": "log_report",
             "ts": 1702234567890,
             "data": {
-                "method": "finger",   # 开锁方式
-                "uid": 5,             # 用户 ID
-                "result": true,       # 开锁结果
-                "fail_count": 0       # 连续失败次数
+                "method": "finger",      # 开锁方式
+                "uid": 5,                # 用户 ID
+                "status": "success",     # 开锁状态: success/fail/locked
+                "lock_time": 0,          # 剩余锁定时间（分钟），仅 locked 状态时 > 0
+                "fail_count": 0          # 连续失败次数
+            }
+        }
+        
+        v5.0 兼容格式（旧版）:
+        {
+            "type": "log_report",
+            "ts": 1702234567890,
+            "data": {
+                "method": "finger",
+                "uid": 5,
+                "result": true,          # 旧版字段，true=成功，false=失败
+                "fail_count": 0
             }
         }
         
@@ -58,8 +71,42 @@ class LogReportHandler(TextMessageHandler):
             
             method = data.get("method")
             uid = data.get("uid", 0)
-            result = data.get("result")
             fail_count = data.get("fail_count", 0)
+            
+            # 子任务 7.1: 支持 status 字段
+            # 子任务 7.2: 兼容旧版 result 字段
+            if "status" in data:
+                # v5.2 新版格式
+                status = data["status"]
+                lock_time = data.get("lock_time", 0)
+            elif "result" in data:
+                # v5.0 旧版格式兼容
+                result = data["result"]
+                status = "success" if result else "fail"
+                lock_time = 0
+                conn.logger.bind(tag=TAG).debug(
+                    f"兼容旧版 result 字段: result={result} -> status={status}"
+                )
+            else:
+                conn.logger.bind(tag=TAG).error("缺少 status 或 result 字段")
+                return
+            
+            # 子任务 7.3: 验证字段取值
+            if status not in ["success", "fail", "locked"]:
+                conn.logger.bind(tag=TAG).error(f"无效的 status 值: {status}")
+                return
+            
+            # 验证 locked 状态时 lock_time 必须 > 0
+            if status == "locked" and lock_time <= 0:
+                conn.logger.bind(tag=TAG).warning(
+                    f"locked 状态但 lock_time 无效: {lock_time}，应该 > 0"
+                )
+            
+            # 验证 success/fail 状态时 lock_time 应该为 0
+            if status in ["success", "fail"] and lock_time != 0:
+                conn.logger.bind(tag=TAG).warning(
+                    f"{status} 状态但 lock_time 不为 0: {lock_time}，应该为 0"
+                )
             
             # ESP32 上传 face 和 temp_pwd 时不附带 uid，服务器需要填充
             uid = self._fill_user_id(conn, method, uid)
@@ -68,13 +115,18 @@ class LogReportHandler(TextMessageHandler):
             if "data" in msg_json:
                 msg_json["data"]["uid"] = uid
             
-            if result:
+            # 子任务 7.5: 增强日志输出（包含 status 和 lock_time）
+            if status == "success":
                 conn.logger.bind(tag=TAG).info(
-                    f"开锁成功: method={method}, uid={uid}"
+                    f"开锁成功: method={method}, uid={uid}, status={status}"
                 )
-            else:
+            elif status == "locked":
                 conn.logger.bind(tag=TAG).warning(
-                    f"开锁失败: method={method}, uid={uid}, fail_count={fail_count}"
+                    f"设备已锁定: method={method}, uid={uid}, status={status}, lock_time={lock_time}分钟"
+                )
+            else:  # fail
+                conn.logger.bind(tag=TAG).warning(
+                    f"开锁失败: method={method}, uid={uid}, status={status}, fail_count={fail_count}"
                 )
                 
                 # 连续失败次数过多，触发警报
@@ -83,8 +135,8 @@ class LogReportHandler(TextMessageHandler):
                         f"连续开锁失败 {fail_count} 次，触发警报"
                     )
             
-            # 持久化到数据库
-            await self._save_to_database(conn, method, uid, result, fail_count)
+            # 子任务 7.4: 持久化到数据库（传入 status 和 lock_time）
+            await self._save_to_database(conn, method, uid, status, lock_time, fail_count)
             
             # 转发给关联的 App
             await self._forward_to_apps(conn, msg_json)
@@ -158,8 +210,17 @@ class LogReportHandler(TextMessageHandler):
         return uid
     
     async def _save_to_database(self, conn, method: str, user_id: int,
-                                 result: bool, fail_count: int):
-        """保存开锁日志到数据库"""
+                                 status: str, lock_time: int, fail_count: int):
+        """保存开锁日志到数据库
+        
+        Args:
+            conn: 连接对象
+            method: 开锁方式
+            user_id: 用户 ID
+            status: 开锁状态 (success/fail/locked)
+            lock_time: 剩余锁定时间（分钟）
+            fail_count: 连续失败次数
+        """
         try:
             db = _get_database(conn)
             if db:
@@ -167,7 +228,8 @@ class LogReportHandler(TextMessageHandler):
                     device_id=conn.device_id,
                     method=method,
                     user_id=user_id,
-                    result=result,
+                    status=status,
+                    lock_time=lock_time,
                     fail_count=fail_count
                 )
         except Exception as e:

@@ -1,4 +1,12 @@
-# 智能猫眼门锁系统 - App 通信协议规范 v2.2
+# 智能猫眼门锁系统 - App 通信协议规范 v2.3
+
+> **协议升级提示**：本文档已从 v2.2 升级到 v2.3，主要变更：
+> - 统一错误码为 0-10（与 ESP32 协议一致）
+> - 更新 log_report 字段（status + lock_time）
+> - 新增 door_opened_report 和 password_report 消息
+> - 新增 door_closed、lock_success、bolt_alarm 事件
+> - 明确 esp32_ack 不转发给 App
+> - 说明 ack 转发时的 ID 映射机制
 
 ## 1. 协议概述
 
@@ -132,7 +140,7 @@ App 发送的所有命令消息应携带 `seq_id` 字段：
 ```json
 {
     "type": "lock_control",
-    "seq_id": "app_1702234567890_001",
+    "seq_id": "1702234567890_001",
     "command": "unlock",
     "duration": 5
 }
@@ -142,7 +150,9 @@ App 发送的所有命令消息应携带 `seq_id` 字段：
 |------|------|------|------|
 | seq_id | string | 推荐 | App 生成的消息序列号 |
 
-> **seq_id 格式建议**：`app_{timestamp}_{sequence}`
+> **seq_id 格式规范**：`{timestamp}_{sequence}`（如 `1702234567890_0`）
+> - timestamp: 毫秒级时间戳（13位）
+> - sequence: 同一毫秒内的序号（从0开始递增）
 
 ### 3.3 服务器 ACK 响应 (Server → App)
 
@@ -151,7 +161,7 @@ App 发送的所有命令消息应携带 `seq_id` 字段：
 ```json
 {
     "type": "server_ack",
-    "seq_id": "app_1702234567890_001",
+    "seq_id": "1702234567890_001",
     "code": 0,
     "msg": "已接收",
     "ts": 1702234567891
@@ -176,6 +186,8 @@ App 发送的所有命令消息应携带 `seq_id` 字段：
 | 3 | 未认证 | App 未完成 hello 认证 |
 | 4 | 内部错误 | 服务器内部错误 |
 | 5 | 重复消息 | seq_id 重复，消息已处理过 |
+
+> **注意**：server_ack 使用 0-5 错误码，ESP32 ack 使用 0-10 错误码（见第 7.6 节）
 
 ### 3.5 防重放机制
 
@@ -251,7 +263,7 @@ ESP32 断开连接时，通知所有关联的 App：
 ```json
 {
     "type": "lock_control",
-    "seq_id": "app_1702234567890_001",
+    "seq_id": "1702234567890_001",
     "command": "unlock",
     "duration": 5
 }
@@ -269,7 +281,7 @@ ESP32 断开连接时，通知所有关联的 App：
 ```json
 {
     "type": "lock_control",
-    "seq_id": "app_1702234567890_002",
+    "seq_id": "1702234567890_002",
     "command": "temp_code",
     "code": "123456",
     "expires": 3600
@@ -286,7 +298,7 @@ ESP32 断开连接时，通知所有关联的 App：
 ```json
 {
     "type": "dev_control",
-    "seq_id": "app_1702234567890_003",
+    "seq_id": "1702234567890_003",
     "target": "beep",
     "count": 3,
     "mode": "alarm"
@@ -304,7 +316,7 @@ ESP32 断开连接时，通知所有关联的 App：
 ```json
 {
     "type": "dev_control",
-    "seq_id": "app_1702234567890_004",
+    "seq_id": "1702234567890_004",
     "target": "light",
     "action": "on"
 }
@@ -320,7 +332,7 @@ ESP32 断开连接时，通知所有关联的 App：
 ```json
 {
     "type": "dev_control",
-    "seq_id": "app_1702234567890_005",
+    "seq_id": "1702234567890_005",
     "target": "oled",
     "icon": 3
 }
@@ -340,7 +352,7 @@ ESP32 断开连接时，通知所有关联的 App：
 ```json
 {
     "type": "user_mgmt",
-    "seq_id": "app_1702234567890_006",
+    "seq_id": "1702234567890_006",
     "category": "finger",
     "command": "add",
     "user_id": 0
@@ -363,7 +375,7 @@ ESP32 断开连接时，通知所有关联的 App：
 ```json
 {
     "type": "system",
-    "seq_id": "app_1702234567890_007",
+    "seq_id": "1702234567890_007",
     "command": "start_monitor",
     "record": false
 }
@@ -389,7 +401,7 @@ ESP32 断开连接时，通知所有关联的 App：
 ```json
 {
     "type": "system",
-    "seq_id": "app_1702234567890_008",
+    "seq_id": "1702234567890_008",
     "command": "stop_monitor"
 }
 ```
@@ -458,6 +470,9 @@ ESP32 上报状态时，Server 自动推送给 App：
 | `pir_trigger` | PIR 人体检测 | 持续时间(秒) |
 | `tamper` | 撬锁报警 | 报警级别 (1-3) |
 | `door_open` | 门未关超时 | 超时时间(分钟) |
+| `door_closed` | 门已关闭 | 无 |
+| `lock_success` | 上锁成功 | 无 |
+| `bolt_alarm` | 反锁报警 | 无 |
 | `low_battery` | 低电量警告 | 当前电量(%) |
 
 ### 7.3 开锁日志推送 (log_report)
@@ -469,11 +484,20 @@ ESP32 上报状态时，Server 自动推送给 App：
     "data": {
         "method": "finger",
         "uid": 5,
-        "result": true,
+        "status": "success",
+        "lock_time": 0,
         "fail_count": 0
     }
 }
 ```
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| method | string | 开锁方式 |
+| uid | int | 用户 ID |
+| status | string | 开锁状态：success=成功, fail=失败, locked=已锁定 |
+| lock_time | int | 剩余锁定时间（分钟），仅 status=locked 时 > 0，其他情况为 0 |
+| fail_count | int | 连续失败次数 |
 
 | method | 说明 |
 |--------|------|
@@ -484,6 +508,14 @@ ESP32 上报状态时，Server 自动推送给 App：
 | `temp_pwd` | 临时密码开锁 |
 | `key` | 机械钥匙 |
 | `remote` | 远程开锁(App) |
+
+| status | 说明 |
+|--------|------|
+| `success` | 开锁成功 |
+| `fail` | 开锁失败 |
+| `locked` | 设备已锁定（连续失败次数过多） |
+
+> **协议升级说明**：v2.3 版本将 `result` (bool) 字段改为 `status` (string) 字段，并新增 `lock_time` 字段表示剩余锁定时间，提供更精确的状态信息。v5.0 旧版使用 `result: true/false` 表示成功/失败，服务器会自动兼容转换。
 
 ### 7.4 到访通知 (visit_notification)
 
@@ -544,22 +576,84 @@ ESP32 执行命令后的确认，Server 转发给 App：
 ```json
 {
     "type": "ack",
-    "msg_id": "cmd_1001",
+    "seq_id": "1702234567890_001",
     "code": 0,
     "msg": "OK"
 }
 ```
 
-| code | 含义 |
-|------|------|
-| 0 | 成功 |
-| 1 | 设备忙碌 |
-| 2 | 参数错误 |
-| 3 | 硬件故障 |
-| 4 | 超时 |
-| 5 | 未授权 |
-| 6 | 资源不足 |
-| 7 | 不支持 |
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| type | string | 固定为 `"ack"` |
+| seq_id | string | App 发送命令时的序列号 |
+| code | int | 执行结果错误码（0-10） |
+| msg | string | 结果描述 |
+
+**统一错误码（0-10）**：
+
+| code | 含义 | 说明 |
+|------|------|------|
+| 0 | 成功 | 命令执行成功 |
+| 1 | 设备离线 | ESP32 未连接 |
+| 2 | 设备忙碌 | 正在执行其他任务 |
+| 3 | 参数错误 | 命令参数不合法 |
+| 4 | 不支持 | 设备不支持该命令 |
+| 5 | 超时 | 命令执行超时 |
+| 6 | 硬件故障 | 硬件错误 |
+| 7 | 资源已满 | 存储空间不足 |
+| 8 | 未认证 | 权限不足 |
+| 9 | 重复消息 | 消息已处理过 |
+| 10 | 内部错误 | 设备内部错误 |
+
+> **ID 映射说明**：
+> - App 发送命令时携带 `seq_id`（如 `app_1702234567890_001`）
+> - Server 转发给 ESP32 时使用 `msg_id`（透传 seq_id）
+> - ESP32 返回 ack 时携带 `msg_id`
+> - Server 转发给 App 时保持原始 `seq_id`，确保 App 可以匹配响应
+>
+> **注意**：`esp32_ack`（ESP32 收到命令的即时确认）不会转发给 App，只有最终的 `ack`（命令执行结果）会转发
+
+### 7.7 门已开启通知 (door_opened_report)
+
+ESP32 检测到门已开启时上报，Server 转发给 App：
+
+```json
+{
+    "type": "door_opened_report",
+    "ts": 1702234567890,
+    "data": {
+        "method": "finger",
+        "source": "outside"
+    }
+}
+```
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| method | string | 开锁方式（同 log_report） |
+| source | string | 开门来源：`outside`(外侧), `inside`(内侧), `unknown`(未知) |
+
+> **说明**：此消息用于记录门的物理开启事件，与 log_report（开锁日志）配合使用
+
+### 7.8 密码上报 (password_report)
+
+ESP32 上报密码查询结果：
+
+```json
+{
+    "type": "password_report",
+    "ts": 1702234567890,
+    "data": {
+        "password": "123456"
+    }
+}
+```
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| password | string | 密码内容 |
+
+> **说明**：此消息仅用于密码查询结果的返回，不存储到数据库
 
 ---
 
@@ -570,7 +664,7 @@ ESP32 执行命令后的确认，Server 转发给 App：
 ```json
 {
     "type": "face_management",
-    "seq_id": "app_1702234567890_009",
+    "seq_id": "1702234567890_009",
     "action": "register",
     "data": {
         "name": "张三",
@@ -600,7 +694,7 @@ ESP32 执行命令后的确认，Server 转发给 App：
 ```json
 {
     "type": "face_management",
-    "seq_id": "app_1702234567890_010",
+    "seq_id": "1702234567890_010",
     "action": "get_persons"
 }
 ```
@@ -627,7 +721,7 @@ ESP32 执行命令后的确认，Server 转发给 App：
 ```json
 {
     "type": "face_management",
-    "seq_id": "app_1702234567890_011",
+    "seq_id": "1702234567890_011",
     "action": "delete_person",
     "data": { "person_id": 5 }
 }
@@ -638,7 +732,7 @@ ESP32 执行命令后的确认，Server 转发给 App：
 ```json
 {
     "type": "face_management",
-    "seq_id": "app_1702234567890_012",
+    "seq_id": "1702234567890_012",
     "action": "update_permission",
     "data": {
         "person_id": 5,
@@ -657,7 +751,7 @@ ESP32 执行命令后的确认，Server 转发给 App：
 ```json
 {
     "type": "face_management",
-    "seq_id": "app_1702234567890_013",
+    "seq_id": "1702234567890_013",
     "action": "get_visits",
     "data": {
         "page": 1,
@@ -680,7 +774,7 @@ ESP32 执行命令后的确认，Server 转发给 App：
 ```json
 {
     "type": "query",
-    "seq_id": "app_1702234567890_014",
+    "seq_id": "1702234567890_014",
     "target": "status"
 }
 ```
@@ -707,7 +801,7 @@ ESP32 执行命令后的确认，Server 转发给 App：
 ```json
 {
     "type": "query",
-    "seq_id": "app_1702234567890_015",
+    "seq_id": "1702234567890_015",
     "target": "status_history",
     "data": {
         "limit": 100,
@@ -746,7 +840,7 @@ ESP32 执行命令后的确认，Server 转发给 App：
 ```json
 {
     "type": "query",
-    "seq_id": "app_1702234567890_016",
+    "seq_id": "1702234567890_016",
     "target": "events",
     "data": {
         "event_type": "bell",
@@ -790,7 +884,7 @@ ESP32 执行命令后的确认，Server 转发给 App：
 ```json
 {
     "type": "query",
-    "seq_id": "app_1702234567890_017",
+    "seq_id": "1702234567890_017",
     "target": "unlock_logs",
     "data": {
         "method": "finger",
@@ -838,7 +932,7 @@ ESP32 执行命令后的确认，Server 转发给 App：
 ```json
 {
     "type": "query",
-    "seq_id": "app_1702234567890_018",
+    "seq_id": "1702234567890_018",
     "target": "media_files",
     "data": {
         "file_type": "face",
@@ -906,7 +1000,7 @@ ESP32 执行命令后的确认，Server 转发给 App：
 ```json
 {
     "type": "media_download",
-    "seq_id": "app_1702234567890_019",
+    "seq_id": "1702234567890_019",
     "file_id": 101
 }
 ```
@@ -915,7 +1009,7 @@ ESP32 执行命令后的确认，Server 转发给 App：
 ```json
 {
     "type": "media_download",
-    "seq_id": "app_1702234567890_020",
+    "seq_id": "1702234567890_020",
     "file_path": "faces/AA:BB:CC:DD:EE:FF/2024-12-11/face_1702234567890_5.jpg"
 }
 ```
@@ -962,7 +1056,7 @@ ESP32 执行命令后的确认，Server 转发给 App：
 ```json
 {
     "type": "media_download_chunk",
-    "seq_id": "app_1702234567890_021",
+    "seq_id": "1702234567890_021",
     "file_id": 100,
     "chunk_index": 0,
     "chunk_size": 1048576
@@ -1052,6 +1146,8 @@ ESP32 执行命令后的确认，Server 转发给 App：
 | `status_report` | 状态上报 | ESP32 转发 |
 | `event_report` | 事件上报 | ESP32 转发 |
 | `log_report` | 开锁日志 | ESP32 转发 |
+| `door_opened_report` | 门已开启通知 | ESP32 转发 |
+| `password_report` | 密码上报 | ESP32 转发 |
 | `user_mgmt_result` | 用户管理结果 | ESP32 转发 |
 | `ack` | ESP32 ACK | ESP32 转发 |
 | `visit_notification` | 到访通知 | Server |
@@ -1060,6 +1156,8 @@ ESP32 执行命令后的确认，Server 转发给 App：
 | `media_download_chunk` | 分片响应 | Server |
 | `system` | 系统响应 | Server |
 | `face_management` | 人脸管理响应 | Server |
+
+> **注意**：`esp32_ack`（ESP32 收到命令的即时确认）不会转发给 App
 
 ---
 
@@ -1073,18 +1171,21 @@ ESP32 执行命令后的确认，Server 转发给 App：
 | `status_report` | ✅ 上报 | ✅ 接收 | Server 转发 |
 | `event_report` | ✅ 上报 | ✅ 接收 | Server 转发 |
 | `log_report` | ✅ 上报 | ✅ 接收 | Server 转发 |
+| `door_opened_report` | ✅ 上报 | ✅ 接收 | Server 转发 |
+| `password_report` | ✅ 上报 | ✅ 接收 | Server 转发 |
 | `lock_control` | ✅ 接收 | ✅ 发送 | Server 代理转发 |
 | `dev_control` | ✅ 接收 | ✅ 发送 | Server 代理转发 |
 | `user_mgmt` | ✅ 接收 | ✅ 发送 | Server 代理转发 |
 | `user_mgmt_result` | ✅ 上报 | ✅ 接收 | Server 转发 |
 | `system` | ✅ 接收 | ✅ 发送 | 监控模式控制 |
-| `face_result` | ✅ 接收 | ❌ | ESP32 专用 |
+| `query` | ✅ 接收 | ✅ 发送 | 数据查询 |
+| `face_result` | ✅ 接收 | ❌ | ESP32 专用（不转发） |
 | `face_management` | ❌ | ✅ | App 专用 |
-| `query` | ❌ | ✅ | App 专用 |
 | `media_download` | ❌ | ✅ | App 专用 |
 | `visit_notification` | ❌ | ✅ | Server 推送 |
 | `server_ack` | ❌ | ✅ | Server 确认 |
 | `device_status` | ❌ | ✅ | Server 推送 |
+| `esp32_ack` | ✅ 上报 | ❌ | ESP32 专用（不转发） |
 | `ack` | ✅ 上报 | ✅ 接收 | Server 转发 |
 
 ### 13.2 协议差异
@@ -1206,6 +1307,7 @@ App                    Server
 
 | 版本 | 日期 | 变更说明 |
 |------|------|----------|
+| v2.3 | 2024-12-11 | 统一错误码为 0-10；更新 log_report 字段（status + lock_time）；新增 door_opened_report 和 password_report 消息；新增 door_closed、lock_success、bolt_alarm 事件；明确 esp32_ack 不转发；说明 ack 转发时的 ID 映射 |
 | v2.2 | 2024-12-11 | 移除心跳机制；新增 server_ack 机制；新增设备上下线通知；新增防重放机制；完善实现状态 |
 | v2.1 | 2024-12-11 | 到访通知新增人脸图片推送；完善数据查询接口响应格式；新增媒体文件下载接口 |
 | v2.0 | 2024-12-11 | 新增 app_id 身份标识；去除 forward 转发机制；统一消息类型与 ESP32 协议 |

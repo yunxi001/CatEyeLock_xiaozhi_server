@@ -70,8 +70,34 @@ class StatusReportHandler(TextMessageHandler):
             # 持久化到数据库
             await self._save_to_database(conn, battery, lux, lock_state, light_state)
             
-            # 转发给关联的 App
-            await self._forward_to_apps(conn, msg_json)
+            # 使用新的状态更新机制推送给 App
+            # 更新灯状态
+            if light_state is not None:
+                await conn.update_device_state("light", {
+                    "status": "on" if light_state == 1 else "off"
+                })
+            
+            # 更新门锁状态
+            if lock_state is not None:
+                await conn.update_device_state("door", {
+                    "status": "open" if lock_state == 1 else "closed",
+                    "locked": lock_state == 0
+                })
+            
+            # 更新传感器数据
+            if battery is not None:
+                await conn.update_device_state("sensor", {
+                    "name": "battery",
+                    "value": battery,
+                    "unit": "%"
+                })
+            
+            if lux is not None:
+                await conn.update_device_state("sensor", {
+                    "name": "lux",
+                    "value": lux,
+                    "unit": "lux"
+                })
             
         except Exception as e:
             conn.logger.bind(tag=TAG).error(f"处理状态上报失败: {e}")

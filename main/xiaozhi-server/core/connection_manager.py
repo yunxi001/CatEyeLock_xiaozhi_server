@@ -42,6 +42,9 @@ class ConnectionManager:
         """
         app_conns = self.get_app_conns(device_id)
         if not app_conns:
+            self.logger.bind(tag=TAG).debug(
+                f"无需通知设备状态变化（无关联 App）: device_id={device_id}, status={status}"
+            )
             return
         
         notification = {
@@ -56,13 +59,34 @@ class ConnectionManager:
         
         msg = json.dumps(notification)
         
+        self.logger.bind(tag=TAG).info(
+            f"开始通知设备状态变化: device_id={device_id}, status={status}, "
+            f"reason={reason}, app_count={len(app_conns)}"
+        )
+        
+        success_count = 0
+        fail_count = 0
+        
         for app_conn in app_conns:
             try:
                 if app_conn.websocket:
                     await app_conn.websocket.send(msg)
-                    self.logger.bind(tag=TAG).debug(f"已通知 App 设备{status}: {device_id}")
+                    success_count += 1
+                    self.logger.bind(tag=TAG).debug(
+                        f"已通知 App 设备{status}: device_id={device_id}, "
+                        f"app_id={getattr(app_conn, 'app_id', 'unknown')}"
+                    )
             except Exception as e:
-                self.logger.bind(tag=TAG).warning(f"通知 App 设备状态失败: {e}")
+                fail_count += 1
+                self.logger.bind(tag=TAG).warning(
+                    f"通知 App 设备状态失败: device_id={device_id}, "
+                    f"app_id={getattr(app_conn, 'app_id', 'unknown')}, error={e}"
+                )
+        
+        self.logger.bind(tag=TAG).info(
+            f"设备状态通知完成: device_id={device_id}, status={status}, "
+            f"成功={success_count}, 失败={fail_count}"
+        )
     
     def register_esp32(self, device_id: str, conn) -> None:
         """注册 ESP32 连接

@@ -16,6 +16,10 @@ from core.handle.textHandler.logReportHandler import LogReportHandler
 from core.handle.textHandler.ackHandler import AckHandler
 from core.handle.textHandler.userMgmtResultHandler import UserMgmtResultHandler
 from core.handle.textHandler.heartbeatHandler import HeartbeatHandler
+# 智能门锁协议 v5.2 新增处理器
+from core.handle.textHandler.esp32AckHandler import Esp32AckHandler
+from core.handle.textHandler.doorOpenedReportHandler import DoorOpenedReportHandler
+from core.handle.textHandler.passwordReportHandler import PasswordReportHandler
 # App 协议 v2.2 新增处理器
 from core.handle.textHandler.queryHandler import QueryHandler
 from core.handle.textHandler.mediaDownloadHandler import MediaDownloadHandler, MediaDownloadChunkHandler
@@ -54,6 +58,10 @@ class TextMessageHandlerRegistry:
             AckHandler(),
             UserMgmtResultHandler(),
             HeartbeatHandler(),
+            # 智能门锁协议 v5.2 新增
+            Esp32AckHandler(),
+            DoorOpenedReportHandler(),
+            PasswordReportHandler(),
             # App 协议 v2.2 新增
             QueryHandler(),
             MediaDownloadHandler(),

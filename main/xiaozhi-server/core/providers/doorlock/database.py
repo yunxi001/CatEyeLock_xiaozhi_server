@@ -2,6 +2,8 @@
 智能门锁数据库操作模块
 """
 import pickle
+import hashlib
+import base64
 import numpy as np
 import mysql.connector
 from mysql.connector import pooling
@@ -15,12 +17,23 @@ TAG = __name__
 class Database:
     """MySQL 数据库操作"""
     
-    def __init__(self, config: dict, logger=None):
+    def __init__(self, config: dict, logger=None, auto_init: bool = True):
+        """初始化数据库连接
+        
+        Args:
+            config: 数据库配置
+            logger: 日志记录器
+            auto_init: 是否自动初始化数据库表（默认 True）
+                      生产环境建议设为 False，通过迁移脚本管理表结构
+        """
         self.config = config
         self.logger = logger
         self.pool = None
-        # 先创建数据库和表，再初始化连接池
-        self._init_database()
+        
+        # 可选的自动初始化（开发环境方便，生产环境建议关闭）
+        if auto_init:
+            self._init_database()
+        
         self._init_pool()
     
     def _init_pool(self):
@@ -111,6 +124,18 @@ class Database:
                 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
             """)
             
+            # 创建 device_info 表（设备基本信息）
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS device_info (
+                    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+                    device_id VARCHAR(64) NOT NULL UNIQUE COMMENT '设备 ID',
+                    password_encrypted VARCHAR(255) DEFAULT NULL COMMENT '加密后的密码',
+                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                    INDEX idx_device_id (device_id)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='设备基本信息表'
+            """)
+            
             # 创建 device_status 表（设备状态记录）
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS device_status (
@@ -146,9 +171,24 @@ class Database:
                     user_id INT,
                     result TINYINT,
                     fail_count INT DEFAULT 0,
+                    status VARCHAR(16) DEFAULT 'success' COMMENT '状态：success/fail/locked',
+                    lock_time INT DEFAULT 0 COMMENT '剩余锁定时间（分钟）',
                     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-                    INDEX idx_device_time (device_id, created_at)
+                    INDEX idx_device_time (device_id, created_at),
+                    INDEX idx_status (status)
                 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+            """)
+            
+            # 创建 door_opened_logs 表（开门日志记录）
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS door_opened_logs (
+                    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+                    device_id VARCHAR(64) NOT NULL COMMENT '设备 ID',
+                    method VARCHAR(16) NOT NULL COMMENT '开锁方式',
+                    source VARCHAR(16) NOT NULL COMMENT '开门来源: outside/inside/unknown',
+                    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+                    INDEX idx_device_time (device_id, created_at)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='开门日志表'
             """)
             
             # 创建 doorlock_users 表（门锁用户信息）
@@ -198,8 +238,25 @@ class Database:
                 conn.close()
     
     def get_connection(self):
-        """获取数据库连接"""
-        return self.pool.get_connection()
+        """获取数据库连接
+        
+        Returns:
+            数据库连接对象
+            
+        Raises:
+            mysql.connector.PoolError: 连接池耗尽
+            mysql.connector.Error: 其他数据库错误
+        """
+        try:
+            return self.pool.get_connection()
+        except mysql.connector.PoolError as e:
+            if self.logger:
+                self.logger.bind(tag=TAG).error(f"数据库连接池耗尽: {e}")
+            raise
+        except mysql.connector.Error as e:
+            if self.logger:
+                self.logger.bind(tag=TAG).error(f"获取数据库连接失败: {e}")
+            raise
     
     # ==================== 序列化方法 ====================
     
@@ -212,6 +269,57 @@ class Database:
     def deserialize_encoding(data: bytes) -> np.ndarray:
         """反序列化 bytes 为人脸编码"""
         return pickle.loads(data)
+    
+    # ==================== 密码加密/解密方法 ====================
+    
+    @staticmethod
+    def encrypt_password(password: str) -> str:
+        """加密密码（使用 SHA256 + Base64）
+        
+        Args:
+            password: 明文密码
+            
+        Returns:
+            加密后的密码字符串
+        """
+        # 使用 SHA256 哈希
+        hash_obj = hashlib.sha256(password.encode('utf-8'))
+        # Base64 编码
+        encrypted = base64.b64encode(hash_obj.digest()).decode('utf-8')
+        return encrypted
+    
+    @staticmethod
+    def decrypt_password(encrypted_password: str) -> str:
+        """解密密码（SHA256 是单向哈希，这里实际上是存储原文的 Base64）
+        
+        注意：为了支持查询返回明文，我们改用可逆加密
+        这里使用简单的 Base64 编码（生产环境应使用 AES 等对称加密）
+        
+        Args:
+            encrypted_password: 加密后的密码
+            
+        Returns:
+            明文密码
+        """
+        try:
+            # 简单的 Base64 解码（实际存储时我们会用 Base64 编码明文）
+            decrypted = base64.b64decode(encrypted_password.encode('utf-8')).decode('utf-8')
+            return decrypted
+        except Exception:
+            # 如果解密失败，返回默认密码
+            return "123456"
+    
+    @staticmethod
+    def encode_password_simple(password: str) -> str:
+        """简单编码密码（Base64，可逆）
+        
+        Args:
+            password: 明文密码
+            
+        Returns:
+            编码后的密码字符串
+        """
+        return base64.b64encode(password.encode('utf-8')).decode('utf-8')
 
     # ==================== Person CRUD ====================
     
@@ -527,9 +635,11 @@ class Database:
         Returns:
             最新状态记录，如果没有则返回 None
         """
-        conn = self.get_connection()
-        cursor = conn.cursor(dictionary=True)
+        conn = None
+        cursor = None
         try:
+            conn = self.get_connection()
+            cursor = conn.cursor(dictionary=True)
             cursor.execute("""
                 SELECT battery, lux, lock_state, light_state, created_at as last_update
                 FROM device_status 
@@ -538,8 +648,10 @@ class Database:
             """, (device_id,))
             return cursor.fetchone()
         finally:
-            cursor.close()
-            conn.close()
+            if cursor:
+                cursor.close()
+            if conn:
+                conn.close()
     
     def get_status_history(self, device_id: str, limit: int = 100, 
                            offset: int = 0) -> Tuple[List[dict], int]:
@@ -553,9 +665,12 @@ class Database:
         Returns:
             (记录列表, 总数)
         """
-        conn = self.get_connection()
-        cursor = conn.cursor(dictionary=True)
+        conn = None
+        cursor = None
         try:
+            conn = self.get_connection()
+            cursor = conn.cursor(dictionary=True)
+            
             # 查询总数
             cursor.execute("""
                 SELECT COUNT(*) as total FROM device_status WHERE device_id = %s
@@ -574,12 +689,19 @@ class Database:
             # 转换 datetime 为字符串
             for r in records:
                 if r.get('created_at'):
-                    r['created_at'] = r['created_at'].isoformat()
+                    try:
+                        r['created_at'] = r['created_at'].isoformat()
+                    except (AttributeError, ValueError) as e:
+                        if self.logger:
+                            self.logger.bind(tag=TAG).warning(f"转换 created_at 失败: {e}")
+                        r['created_at'] = str(r['created_at'])
             
             return records, total
         finally:
-            cursor.close()
-            conn.close()
+            if cursor:
+                cursor.close()
+            if conn:
+                conn.close()
     
     def get_device_status_history(self, device_id: str, limit: int = 100) -> List[dict]:
         """获取设备状态历史（兼容旧接口）"""
@@ -616,9 +738,12 @@ class Database:
         Returns:
             (记录列表, 总数)
         """
-        conn = self.get_connection()
-        cursor = conn.cursor(dictionary=True)
+        conn = None
+        cursor = None
         try:
+            conn = self.get_connection()
+            cursor = conn.cursor(dictionary=True)
+            
             # 构建查询条件
             where_sql = "device_id = %s"
             params = [device_id]
@@ -642,12 +767,19 @@ class Database:
             # 转换 datetime 为字符串
             for r in records:
                 if r.get('created_at'):
-                    r['created_at'] = r['created_at'].isoformat()
+                    try:
+                        r['created_at'] = r['created_at'].isoformat()
+                    except (AttributeError, ValueError) as e:
+                        if self.logger:
+                            self.logger.bind(tag=TAG).warning(f"转换 created_at 失败: {e}")
+                        r['created_at'] = str(r['created_at'])
             
             return records, total
         finally:
-            cursor.close()
-            conn.close()
+            if cursor:
+                cursor.close()
+            if conn:
+                conn.close()
     
     def get_device_events(self, device_id: str, event_type: str = None, 
                           limit: int = 100) -> List[dict]:
@@ -658,15 +790,40 @@ class Database:
     # ==================== 开锁日志 CRUD ====================
     
     def save_unlock_log(self, device_id: str, method: str, user_id: int,
-                        result: bool, fail_count: int = 0) -> int:
-        """保存开锁日志"""
+                        result: bool = None, fail_count: int = 0,
+                        status: str = None, lock_time: int = 0) -> int:
+        """保存开锁日志
+        
+        支持 v5.0 和 v5.2 两种格式：
+        - v5.0: 使用 result (bool) 参数
+        - v5.2: 使用 status (str) 和 lock_time (int) 参数
+        
+        Args:
+            device_id: 设备 ID
+            method: 开锁方式
+            user_id: 用户 ID
+            result: 开锁结果（旧版，bool）
+            fail_count: 连续失败次数
+            status: 开锁状态（新版，success/fail/locked）
+            lock_time: 剩余锁定时间（分钟）
+            
+        Returns:
+            插入记录的 ID
+        """
         conn = self.get_connection()
         cursor = conn.cursor()
         try:
+            # 如果没有提供 status，从 result 转换
+            if status is None:
+                if result is None:
+                    raise ValueError("必须提供 result 或 status 参数")
+                status = "success" if result else "fail"
+                lock_time = 0
+            
             cursor.execute("""
-                INSERT INTO unlock_logs (device_id, method, user_id, result, fail_count)
-                VALUES (%s, %s, %s, %s, %s)
-            """, (device_id, method, user_id, 1 if result else 0, fail_count))
+                INSERT INTO unlock_logs (device_id, method, user_id, result, fail_count, status, lock_time)
+                VALUES (%s, %s, %s, %s, %s, %s, %s)
+            """, (device_id, method, user_id, 1 if status == "success" else 0, fail_count, status, lock_time))
             conn.commit()
             return cursor.lastrowid
         finally:
@@ -688,9 +845,12 @@ class Database:
         Returns:
             (记录列表, 总数)
         """
-        conn = self.get_connection()
-        cursor = conn.cursor(dictionary=True)
+        conn = None
+        cursor = None
         try:
+            conn = self.get_connection()
+            cursor = conn.cursor(dictionary=True)
+            
             # 构建查询条件
             where_sql = "device_id = %s"
             params = [device_id]
@@ -717,12 +877,106 @@ class Database:
             # 转换 datetime 为字符串
             for r in records:
                 if r.get('created_at'):
-                    r['created_at'] = r['created_at'].isoformat()
+                    try:
+                        r['created_at'] = r['created_at'].isoformat()
+                    except (AttributeError, ValueError) as e:
+                        if self.logger:
+                            self.logger.bind(tag=TAG).warning(f"转换 created_at 失败: {e}")
+                        r['created_at'] = str(r['created_at'])
             
             return records, total
         finally:
+            if cursor:
+                cursor.close()
+            if conn:
+                conn.close()
+    
+    # ==================== 开门日志 CRUD ====================
+    
+    def save_door_opened_log(self, device_id: str, method: str, source: str) -> int:
+        """保存开门日志
+        
+        Args:
+            device_id: 设备 ID
+            method: 开锁方式
+            source: 开门来源 (outside/inside/unknown)
+            
+        Returns:
+            插入记录的 ID
+        """
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        try:
+            cursor.execute("""
+                INSERT INTO door_opened_logs (device_id, method, source)
+                VALUES (%s, %s, %s)
+            """, (device_id, method, source))
+            conn.commit()
+            return cursor.lastrowid
+        finally:
             cursor.close()
             conn.close()
+    
+    def get_door_opened_logs(self, device_id: str, method: str = None,
+                             source: str = None, limit: int = 100,
+                             offset: int = 0) -> Tuple[List[dict], int]:
+        """获取开门日志历史（带分页和过滤）
+        
+        Args:
+            device_id: 设备 ID
+            method: 开锁方式过滤（可选）
+            source: 开门来源过滤（可选）
+            limit: 每页数量
+            offset: 偏移量
+            
+        Returns:
+            (记录列表, 总数)
+        """
+        conn = None
+        cursor = None
+        try:
+            conn = self.get_connection()
+            cursor = conn.cursor(dictionary=True)
+            
+            # 构建查询条件
+            where_sql = "device_id = %s"
+            params = [device_id]
+            if method:
+                where_sql += " AND method = %s"
+                params.append(method)
+            if source:
+                where_sql += " AND source = %s"
+                params.append(source)
+            
+            # 查询总数
+            cursor.execute(f"SELECT COUNT(*) as total FROM door_opened_logs WHERE {where_sql}", params)
+            total = cursor.fetchone()['total']
+            
+            # 查询记录
+            cursor.execute(f"""
+                SELECT id, method, source, created_at
+                FROM door_opened_logs 
+                WHERE {where_sql}
+                ORDER BY created_at DESC LIMIT %s OFFSET %s
+            """, params + [limit, offset])
+            records = cursor.fetchall()
+            
+            # 转换 datetime 为字符串
+            for r in records:
+                if r.get('created_at'):
+                    try:
+                        r['created_at'] = r['created_at'].isoformat()
+                    except (AttributeError, ValueError) as e:
+                        if self.logger:
+                            self.logger.bind(tag=TAG).warning(f"转换 created_at 失败: {e}")
+                        r['created_at'] = str(r['created_at'])
+            
+            return records, total
+        finally:
+            if cursor:
+                cursor.close()
+            if conn:
+                conn.close()
     
     def get_media_file_by_id(self, file_id: int) -> Optional[dict]:
         """根据 ID 获取单个媒体文件信息
@@ -733,9 +987,11 @@ class Database:
         Returns:
             文件信息字典，如果不存在则返回 None
         """
-        conn = self.get_connection()
-        cursor = conn.cursor(dictionary=True)
+        conn = None
+        cursor = None
         try:
+            conn = self.get_connection()
+            cursor = conn.cursor(dictionary=True)
             cursor.execute("""
                 SELECT id, device_id, file_type, file_path, file_size, duration, user_id, created_at
                 FROM media_files 
@@ -743,11 +999,18 @@ class Database:
             """, (file_id,))
             record = cursor.fetchone()
             if record and record.get('created_at'):
-                record['created_at'] = record['created_at'].isoformat()
+                try:
+                    record['created_at'] = record['created_at'].isoformat()
+                except (AttributeError, ValueError) as e:
+                    if self.logger:
+                        self.logger.bind(tag=TAG).warning(f"转换 created_at 失败: {e}")
+                    record['created_at'] = str(record['created_at'])
             return record
         finally:
-            cursor.close()
-            conn.close()
+            if cursor:
+                cursor.close()
+            if conn:
+                conn.close()
 
     # ==================== 门锁用户 CRUD ====================
     
@@ -850,9 +1113,12 @@ class Database:
         Returns:
             (记录列表, 总数)
         """
-        conn = self.get_connection()
-        cursor = conn.cursor(dictionary=True)
+        conn = None
+        cursor = None
         try:
+            conn = self.get_connection()
+            cursor = conn.cursor(dictionary=True)
+            
             # 构建查询条件
             where_sql = "device_id = %s"
             params = [device_id]
@@ -882,12 +1148,19 @@ class Database:
             # 转换 datetime 为字符串
             for r in records:
                 if r.get('created_at'):
-                    r['created_at'] = r['created_at'].isoformat()
+                    try:
+                        r['created_at'] = r['created_at'].isoformat()
+                    except (AttributeError, ValueError) as e:
+                        if self.logger:
+                            self.logger.bind(tag=TAG).warning(f"转换 created_at 失败: {e}")
+                        r['created_at'] = str(r['created_at'])
             
             return records, total
         finally:
-            cursor.close()
-            conn.close()
+            if cursor:
+                cursor.close()
+            if conn:
+                conn.close()
 
     # ==================== 数据清理 ====================
     
@@ -945,6 +1218,115 @@ class Database:
             
             conn.commit()
             return result
+        finally:
+            cursor.close()
+            conn.close()
+    
+    # ==================== 设备密码管理 ====================
+    
+    def init_device_password(self, device_id: str, default_password: str = "123456") -> bool:
+        """初始化设备密码（如果不存在）
+        
+        Args:
+            device_id: 设备 ID
+            default_password: 默认密码，默认为 "123456"
+            
+        Returns:
+            是否成功初始化
+        """
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        try:
+            # 检查设备是否已存在
+            cursor.execute("SELECT id FROM device_info WHERE device_id = %s", (device_id,))
+            if cursor.fetchone():
+                # 设备已存在，不需要初始化
+                return True
+            
+            # 加密密码
+            encrypted = self.encode_password_simple(default_password)
+            
+            # 插入设备信息
+            cursor.execute("""
+                INSERT INTO device_info (device_id, password_encrypted)
+                VALUES (%s, %s)
+            """, (device_id, encrypted))
+            conn.commit()
+            
+            if self.logger:
+                self.logger.bind(tag=TAG).info(f"设备 {device_id} 密码已初始化为默认值")
+            return True
+        except mysql.connector.Error as e:
+            if self.logger:
+                self.logger.bind(tag=TAG).error(f"初始化设备密码失败: {e}")
+            return False
+        finally:
+            cursor.close()
+            conn.close()
+    
+    def update_device_password(self, device_id: str, password: str) -> bool:
+        """更新设备密码
+        
+        Args:
+            device_id: 设备 ID
+            password: 新密码（明文）
+            
+        Returns:
+            是否更新成功
+        """
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        try:
+            # 加密密码
+            encrypted = self.encode_password_simple(password)
+            
+            # 更新或插入
+            cursor.execute("""
+                INSERT INTO device_info (device_id, password_encrypted)
+                VALUES (%s, %s)
+                ON DUPLICATE KEY UPDATE password_encrypted = VALUES(password_encrypted)
+            """, (device_id, encrypted))
+            conn.commit()
+            
+            if self.logger:
+                self.logger.bind(tag=TAG).info(f"设备 {device_id} 密码已更新")
+            return cursor.rowcount > 0
+        except mysql.connector.Error as e:
+            if self.logger:
+                self.logger.bind(tag=TAG).error(f"更新设备密码失败: {e}")
+            return False
+        finally:
+            cursor.close()
+            conn.close()
+    
+    def get_device_password(self, device_id: str) -> Optional[str]:
+        """获取设备密码（明文）
+        
+        Args:
+            device_id: 设备 ID
+            
+        Returns:
+            密码明文，如果不存在则返回默认密码 "123456"
+        """
+        conn = self.get_connection()
+        cursor = conn.cursor(dictionary=True)
+        try:
+            cursor.execute("""
+                SELECT password_encrypted FROM device_info WHERE device_id = %s
+            """, (device_id,))
+            row = cursor.fetchone()
+            
+            if row and row.get('password_encrypted'):
+                # 解密密码
+                return self.decrypt_password(row['password_encrypted'])
+            else:
+                # 设备不存在或密码为空，初始化默认密码
+                self.init_device_password(device_id)
+                return "123456"
+        except mysql.connector.Error as e:
+            if self.logger:
+                self.logger.bind(tag=TAG).error(f"获取设备密码失败: {e}")
+            return "123456"
         finally:
             cursor.close()
             conn.close()

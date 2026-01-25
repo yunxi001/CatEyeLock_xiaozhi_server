@@ -44,11 +44,24 @@ class EventReportHandler(TextMessageHandler):
         - tamper: 撬锁报警
         - door_open: 门未关超时
         - low_battery: 低电量警告
+        - door_closed: 门已关闭 (v5.2 新增)
+        - lock_success: 上锁成功 (v5.2 新增)
+        - bolt_alarm: 反锁报警 (v5.2 新增)
         """
         try:
             ts = msg_json.get("ts")
             event = msg_json.get("event")
             param = msg_json.get("param")
+            
+            # 验证事件类型
+            valid_events = [
+                "bell", "pir_trigger", "tamper", "door_open", "low_battery",
+                "door_closed", "lock_success", "bolt_alarm"  # v5.2 新增
+            ]
+            
+            if event not in valid_events:
+                conn.logger.bind(tag=TAG).warning(f"未知事件类型: {event}")
+                # 仍然转发，但记录警告
             
             conn.logger.bind(tag=TAG).info(f"事件上报: event={event}, param={param}")
             
@@ -66,6 +79,12 @@ class EventReportHandler(TextMessageHandler):
                 await self._handle_door_open_event(conn, ts, param)
             elif event == "low_battery":
                 await self._handle_low_battery_event(conn, ts, param)
+            elif event == "door_closed":
+                await self._handle_door_closed_event(conn, ts, param)
+            elif event == "lock_success":
+                await self._handle_lock_success_event(conn, ts, param)
+            elif event == "bolt_alarm":
+                await self._handle_bolt_alarm_event(conn, ts, param)
             
             # 转发给关联的 App
             await self._forward_to_apps(conn, msg_json)
@@ -109,6 +128,19 @@ class EventReportHandler(TextMessageHandler):
         """处理低电量警告事件"""
         battery_level = param
         conn.logger.bind(tag=TAG).warning(f"低电量警告: {battery_level}%")
+
+    async def _handle_door_closed_event(self, conn, ts: int, param):
+        """处理门已关闭事件 (v5.2 新增)"""
+        conn.logger.bind(tag=TAG).info("门已关闭")
+
+    async def _handle_lock_success_event(self, conn, ts: int, param):
+        """处理上锁成功事件 (v5.2 新增)"""
+        conn.logger.bind(tag=TAG).info("上锁成功")
+
+    async def _handle_bolt_alarm_event(self, conn, ts: int, param):
+        """处理反锁报警事件 (v5.2 新增)"""
+        alarm_type = param  # 报警类型
+        conn.logger.bind(tag=TAG).warning(f"反锁报警！类型: {alarm_type}")
 
     async def _forward_to_apps(self, conn, msg_json: Dict[str, Any]):
         """转发事件到所有关联的 App"""

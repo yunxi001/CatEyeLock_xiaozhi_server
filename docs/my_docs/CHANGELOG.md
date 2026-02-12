@@ -1,5 +1,319 @@
 # 变更日志
 
+## 2026-02-09
+
+### 智能门锁 AI 功能完整实现
+
+#### 工作概述
+
+完成智能门锁 AI 功能的完整开发，包括访客意图识别、快递看护模式、个性化欢迎词、数据库设计、核心服务、API 接口、提示词设计、集成测试和完整文档。
+
+#### 完成内容
+
+**1. 数据库设计与迁移**
+
+- ✅ 扩展 `persons` 表：新增 `is_owner` 字段和 `custom_greeting` TEXT 字段
+- ✅ 创建 `doorlock_config` 表：设备配置管理
+- ✅ 创建 `doorlock_visitor_intents` 表：访客意图识别记录
+- ✅ 创建 `doorlock_package_alerts` 表：快递警报记录
+- ✅ 创建索引 `idx_device_time` 优化查询性能
+- ✅ 编写迁移脚本：`migrations/add_doorlock_ai_tables.sql`
+- ✅ 编写执行脚本：`migrations/run_doorlock_ai_migration.py`
+- ✅ 编写验证脚本：`migrations/verify_doorlock_ai_migration.py`
+
+**2. 核心服务实现**
+
+- ✅ `DoorlockDatabase` - 数据库服务（10+ CRUD 方法）
+- ✅ `SessionManager` - 会话管理器（创建、清除、超时判定）
+- ✅ `PackageGuardManager` - 看护模式管理器（启用、监控、威胁检测）
+- ✅ `NotificationService` - 通知服务（访客意图、快递警报、状态变化）
+- ✅ `FaceRecognitionHandler` - 人脸识别处理器（3次重试机制）
+- ✅ `GreetingHandler` - 欢迎词处理器（时段选择、回退机制）
+- ✅ `DoorlockIntentHandler` - 意图识别处理器（对话管理、总结生成）
+
+**3. AI 工具函数实现**
+
+- ✅ `DoorlockTools` - 5个工具函数（启用/关闭看护、更新基准、报告状态/意图）
+- ✅ 工具函数 JSON Schema 定义
+- ✅ 工具调用路由和结果处理
+- ✅ 工具调用日志记录和性能监控
+- ✅ 注册到 VLLM 提供者
+
+**4. HTTP API 实现**
+
+- ✅ 设备配置 API（GET/POST /api/doorlock/config）
+- ✅ 看护模式控制 API（POST /api/doorlock/package_guard/start, stop）
+- ✅ 欢迎词配置 API（GET/POST /api/doorlock/welcome/config, GET templates）
+- ✅ 历史记录查询 API（GET /api/doorlock/intents/history, alerts/history）
+- ✅ 参数验证、错误处理、CORS 支持
+
+**5. 提示词设计**
+
+- ✅ 意图识别提示词（系统角色、对话策略、工具调用说明、示例对话）
+- ✅ 看护模式提示词（威胁等级标准、行为类型定义、示例场景）
+- ✅ 欢迎词模板（温馨家庭、简洁风格、正式风格）
+- ✅ 配置文件：`config/doorlock_prompts.yaml`
+
+**6. 配置文件**
+
+- ✅ 主配置文件扩展（`config.yaml` 新增 doorlock 配置段）
+- ✅ 提示词配置文件（`config/doorlock_prompts.yaml`）
+- ✅ 配置模板文件（`config/doorlock_prompts.yaml.example`）
+
+**7. 集成与测试**
+
+- ✅ PIR 触发事件集成
+- ✅ VLLM 服务集成（多图片输入、工具调用处理）
+- ✅ ESP32 拍照功能集成（MCP 协议）
+- ✅ App 通信协议集成（3种消息类型）
+- ✅ 单元测试（数据模型、数据库、会话管理、工具函数等）
+- ✅ 集成测试（完整访客流程、看护模式流程、人脸识别重试）
+
+**8. 文档与部署**
+
+- ✅ API 文档：`docs/my_docs/doorlock-api-documentation.md`
+- ✅ 使用指南：`docs/my_docs/smart-doorlock-usage-guide.md`
+- ✅ 测试指南：`docs/my_docs/smart-doorlock-test-guide.md`
+- ✅ 部署脚本：`migrations/deploy_doorlock_ai.sh`
+- ✅ 回滚脚本：`migrations/rollback_doorlock_ai.sh`
+
+#### 核心功能
+
+**访客意图识别**：
+
+- PIR 触发 → 人脸识别（最多3次重试）→ 有权限播放欢迎词开门 / 无权限进行对话
+- AI 主动问候并引导对话，识别访客意图（送快递、拜访、推销等）
+- 生成结构化总结（重要信息、意图类型、完整摘要）
+- 推送通知到 App，记录对话历史到数据库
+
+**快递看护模式**：
+
+- AI 自动判断启用时机（访客提到"快递放门口了"）或手动启动
+- PIR 检测到人体时每5秒拍照，对比基准图片检测异常
+- 威胁等级判断（低/中/高）并采取不同响应（无操作/语音提示/语音警告）
+- 主人取走快递后自动关闭，记录所有警报到数据库
+
+**个性化欢迎词**：
+
+- 支持分时段配置（早晨/下午/晚上/夜间/默认）
+- 提供3种预设模板（温馨家庭、简洁风格、正式风格）
+- 支持自定义欢迎词文本
+- 回退机制确保始终有欢迎词播放
+
+#### 技术特性
+
+- 异步编程（async/await）
+- 线程安全的会话管理
+- Token 消耗监控（超过80%警告）
+- 数据库连接池和错误重试
+- 完整的日志记录（loguru）
+- CORS 支持的 HTTP API
+- 分页查询和时间范围过滤
+- 软删除机制保留历史记录
+
+#### 相关文档
+
+- [API 文档](./doorlock-api-documentation.md)
+- [使用指南](./smart-doorlock-usage-guide.md)
+- [测试指南](./smart-doorlock-test-guide.md)
+- [需求文档](../.kiro/specs/smart-doorlock-ai/requirements.md)
+- [设计文档](../.kiro/specs/smart-doorlock-ai/design.md)
+
+---
+
+## 2026-01-30 (更新)
+
+### 门锁用户管理功能实现完成
+
+#### 工作概述
+
+实现了指纹、NFC、密码用户的元数据存储和查询功能，支持用户备注、创建者追踪、软删除等特性。
+
+#### 完成内容
+
+**1. 数据库设计与迁移**
+
+- ✅ 创建 `doorlock_users` 表（统一管理指纹/NFC/密码用户）
+- ✅ 定义唯一键约束：`uk_device_type_userid (device_id, user_type, user_id)`
+- ✅ 创建索引：device_id, user_type, status, created_at
+- ✅ 编写 SQL 迁移脚本：`migrations/add_doorlock_users_table.sql`
+- ✅ 编写 Python 执行脚本：`migrations/run_add_doorlock_users.py`
+
+**2. 数据库 CRUD 方法** (`core/providers/doorlock/database.py`)
+
+- ✅ `save_doorlock_user()` - 保存用户（支持 INSERT/UPDATE）
+- ✅ `delete_doorlock_user()` - 删除用户（软删除）
+- ✅ `get_doorlock_user()` - 获取单个用户
+- ✅ `query_doorlock_users()` - 查询用户列表（带分页）
+- ✅ `clear_doorlock_users()` - 清空用户（软删除）
+
+**3. 消息处理层实现**
+
+- ✅ `UserMgmtProxyHandler` - 支持 `user_name` 字段
+  - 接收 App 发送的 `user_name` 参数
+  - 缓存到 ESP32 连接对象的 `_pending_user_names` 字典
+  - 转发给 ESP32 时移除 `user_name` 字段
+- ✅ `UserMgmtResultHandler` - 处理结果并更新数据库
+  - 从缓存获取 `user_name` 和 `app_id`
+  - 根据操作类型（add/del/clear）更新数据库
+  - 记录详细日志
+- ✅ `QueryHandler` - 添加 `doorlock_users` 查询支持
+  - 支持按 `user_type` 过滤
+  - 支持分页查询
+  - 返回完整的用户信息
+
+**4. 协议文档更新** (`智能猫眼门锁系统-服务器与App通信协议规范-v2.4.md`)
+
+- ✅ 第 5.6 节：添加 `user_name` 字段说明
+- ✅ 第 9.7 节：新增门锁用户查询接口（新增）
+- ✅ 第 9.8 节：查询错误响应（原 9.7 节）
+- ✅ 第 17 节：更新版本历史记录
+
+**5. 实现文档**
+
+- ✅ 创建完整的实现报告：`doorlock-user-management-implementation.md`
+- ✅ 包含数据流程图、测试建议、注意事项、后续优化建议
+
+#### 数据流程
+
+**添加用户流程**：
+
+```
+App (user_name) → Server (缓存) → ESP32 (无 user_name)
+ESP32 (user_id) → Server (保存到数据库) → App
+```
+
+**查询用户流程**：
+
+```
+App (query doorlock_users) → Server (数据库查询) → App (用户列表)
+```
+
+**删除用户流程**：
+
+```
+App (del) → Server → ESP32 → Server (软删除数据库) → App
+```
+
+#### 技术特性
+
+- 采用软删除机制，保留历史记录
+- 使用 `seq_id` 作为缓存键，避免并发冲突
+- 数据库使用唯一键约束，防止重复插入
+- 支持分页查询，避免一次返回大量数据
+- 遵循异步编程规范（async/await）
+- 使用 loguru 记录详细日志
+
+#### 相关文档
+
+- [门锁用户管理功能实现报告](./doorlock-user-management-implementation.md)
+- [App 协议规范 v2.4](./智能猫眼门锁系统-服务器与App通信协议规范-v2.4.md)
+
+---
+
+## 2026-01-30
+
+### App 协议文档完善工作完成
+
+#### 工作概述
+
+完成了 App 协议文档的全面完善和不一致性修正，确保协议文档、分析文档和代码实现三者完全一致。
+
+#### 完成内容
+
+**1. 协议文档补充** (`智能猫眼门锁系统-服务器与App通信协议规范-v2.4.md`)
+
+- ✅ 第 9.6 节：添加密码查询接口规范
+- ✅ 第 10.3 节：添加文件大小限制说明（50MB 完整下载，分片参数）
+- ✅ 第 11.3 节：添加音频解码错误处理机制
+- ✅ 第 15.3 节：添加错误响应格式规范
+- ✅ 第 16.3 节：添加实现注意事项（Server 端和 App 端建议）
+- ✅ 第 17 节：更新版本历史记录
+
+**2. 分析文档验证** (`app-data-processing-detailed-analysis.md`)
+
+- ✅ 第 1.2.2 节：SeqIdCache 淘汰策略已正确描述为 FIFO
+- ✅ 第 2.1 节：协议版本已明确区分 App 协议 v2.4 和 ESP32 协议 v5.2
+- ✅ 第 6.3 节：错误码表已更新为 v2.4 版本（server_ack 简化版 + 业务响应完整版）
+- ✅ 全文：重复消息错误码已全部更新为 code=9
+
+**3. 不一致性分析更新** (`app-data-processing-code-inconsistencies.md`)
+
+- ✅ 标记所有待完成问题为已完成
+- ✅ 更新修改完成情况和验证清单
+- ✅ 更新报告状态为"所有问题已解决"
+
+**4. 完成报告生成** (`app-protocol-documentation-completion-report.md`)
+
+- ✅ 详细记录所有完成的工作内容
+- ✅ 提供文档使用指南
+- ✅ 给出后续维护建议
+
+#### 文档一致性验证
+
+- ✅ 协议文档与代码实现一致
+- ✅ 分析文档与代码实现一致
+- ✅ 协议文档与分析文档一致
+- ✅ 错误码使用统一规范（0-10 体系）
+
+#### 质量指标
+
+- 完整性: 100%（所有章节完整）
+- 一致性: 100%（文档与代码一致）
+- 准确性: 100%（所有内容准确）
+- 可读性: 优秀（结构清晰，易于理解）
+
+#### 相关文档
+
+- [App 协议规范 v2.4](./智能猫眼门锁系统-服务器与App通信协议规范-v2.4.md)
+- [App 数据处理流程详细分析](./app-data-processing-detailed-analysis.md)
+- [文档与代码不一致分析报告](./app-data-processing-code-inconsistencies.md)
+- [文档完善工作完成报告](./app-protocol-documentation-completion-report.md)
+
+---
+
+## 2026-01-25
+
+### 禁用 ESP32 连接超时机制
+
+#### 修改说明
+
+禁用了服务器端的 ESP32 连接超时检测机制，使 ESP32 设备可以保持永久在线状态。
+
+#### 修改内容
+
+**修改文件：**
+
+1. `main/xiaozhi-server/core/connection.py`
+   - 禁用超时检查任务启动（第 206-208 行）
+   - 设置 `self.timeout_task = None`
+
+2. `main/xiaozhi-server/core/handle/receiveAudioHandle.py`
+   - 禁用无语音活动超时关闭逻辑（第 94-108 行）
+   - 注释掉超时检查代码块
+
+**影响：**
+
+- ✅ ESP32 连接不会因超时被服务器主动断开
+- ✅ 只有在网络异常、主动断开或服务器重启时才会断开
+- ⚠️ 需要依赖 WebSocket 底层 TCP keepalive 检测僵尸连接
+
+**回退方案：**
+
+- 详见 `docs/my_docs/disable-timeout-mechanism.md`
+- 取消注释相关代码即可恢复超时机制
+
+**建议：**
+
+- 配合启用心跳机制监控连接健康状态
+- ESP32 端定期发送 `heartbeat` 消息
+
+#### 相关文档
+
+- [禁用超时机制详细说明](./disable-timeout-mechanism.md)
+
+---
+
 ## 2025-12-12
 
 ### ESP32 协议功能实现检查完成
@@ -4597,3 +4911,1828 @@ heartbeat_interval: 30 # 心跳间隔（秒），默认 30 秒
 2. 验证服务器返回 `heartbeat_ack` 响应
 3. 验证日志记录策略（第 1、11、21... 次详细日志，其他 debug 日志）
 4. 验证连接不会因超时断开
+
+---
+
+## 2026-01-25
+
+### 禁用 ESP32 连接超时检查机制
+
+#### 修改文件
+
+- `main/xiaozhi-server/core/connection.py`
+
+#### 修改位置
+
+- `ConnectionHandler` 类的 `_handle_connection` 方法（第 202-207 行）
+
+#### 修改时间
+
+- 2026-01-25
+
+#### 变更内容
+
+1. **禁用超时检查任务启动**：
+   - 原代码：`self.timeout_task = asyncio.create_task(self._check_timeout())`
+   - 修改为：`self.timeout_task = None`
+   - 添加注释说明如何恢复超时机制
+
+2. **保留恢复方案**：
+   - 在注释中说明如何重新启用超时检查
+   - 提供清晰的回退路径
+
+#### 功能说明
+
+禁用服务器端的 ESP32 连接超时检测机制，使 ESP32 设备可以保持永久在线状态，不会因为无活动而被服务器主动断开连接。
+
+**影响范围**：
+
+- ESP32 连接不会因超时被服务器主动断开
+- 只有在以下情况下连接才会断开：
+  1. ESP32 主动断开连接
+  2. 网络异常导致连接中断
+  3. 服务器重启
+  4. WebSocket 连接异常
+
+**原有超时机制说明**：
+
+服务器原有两道超时关闭机制：
+
+1. **第一道：无语音活动超时**（`receiveAudioHandle.py`）
+   - 触发条件：无语音活动超过配置时间（默认 120 秒）
+   - 行为：设置 `conn.close_after_chat = True`
+   - 配置项：`config.yaml` 中的 `close_connection_no_voice_time`
+
+2. **第二道：连接总超时**（`connection.py`）
+   - 触发条件：无任何活动超过 `timeout_seconds`（默认 180 秒）
+   - 计算公式：`timeout_seconds = close_connection_no_voice_time + 60`
+   - 行为：主动调用 `await self.close(self.websocket)`
+   - 检查频率：每 10 秒检查一次
+
+**本次修改**：
+
+- 禁用了第二道超时检查任务的启动
+- 第一道超时机制已在之前的修改中禁用（参见 `docs/my_docs/disable-timeout-mechanism.md`）
+
+**回退方案**：
+
+如需恢复超时机制，取消以下代码的注释：
+
+```python
+# 第 206-207 行
+self.timeout_task = asyncio.create_task(self._check_timeout())
+```
+
+并注释掉：
+
+```python
+self.timeout_task = None
+```
+
+**建议配合使用**：
+
+启用心跳机制（推荐）以监控连接健康状态：
+
+- ESP32 端定期发送心跳消息（每 30 秒）
+- 服务器响应 `heartbeat_ack`
+- 通过心跳监控设备在线状态和健康状况
+
+**相关文档**：
+
+- `docs/my_docs/disable-timeout-mechanism.md` - 禁用超时机制的完整说明文档
+- `docs/my_docs/智能猫眼门锁系统-ESP32与服务器通信协议规范-v5.2.md` - 第 3.9 节（心跳机制）
+
+**配置文件**：
+
+`config.yaml` 中的相关配置项（禁用后不再生效）：
+
+```yaml
+close_connection_no_voice_time: 120 # 无语音活动超时时间（秒）
+```
+
+**日志变化**：
+
+- **禁用前**：会出现超时相关日志
+
+  ```
+  [INFO] 连接超时，准备关闭
+  [INFO] 超时检查任务已退出
+  [INFO] ESP32 连接已注销: device_001, 原因: timeout
+  ```
+
+- **禁用后**：不会再出现超时相关日志，只有在真正断开时才会记录
+  ```
+  [INFO] 客户端断开连接
+  [INFO] ESP32 连接已注销: device_001, 原因: connection_lost
+  ```
+
+**测试建议**：
+
+1. **长时间无活动连接测试**：
+   - ESP32 连接服务器
+   - 发送 hello 消息
+   - 保持连接但不发送任何消息
+   - 等待超过原超时时间（3 分钟）
+   - 预期结果：连接保持，不会被断开
+
+2. **间歇性活动测试**：
+   - ESP32 连接服务器
+   - 每隔 5 分钟发送一次消息
+   - 持续测试 1 小时
+   - 预期结果：连接始终保持
+
+3. **网络异常恢复测试**：
+   - ESP32 连接服务器
+   - 模拟网络中断（拔网线）
+   - 恢复网络
+   - ESP32 重新连接
+   - 预期结果：能够正常重连
+
+**注意事项**：
+
+1. **潜在风险**：
+   - 僵尸连接：如果 ESP32 异常断开但服务器未检测到，连接对象会一直占用内存
+   - 资源占用：长期保持的连接会持续占用服务器资源（内存、线程等）
+   - 调试困难：无法通过超时日志判断连接是否正常
+
+2. **缓解措施**：
+   - 依赖 WebSocket 底层的 TCP keepalive 机制
+   - 监控服务器资源使用情况
+   - 建议启用心跳机制进行监控
+
+**版本信息**：
+
+- 修改版本：v1.0
+- 修改日期：2026-01-25
+- 审核状态：已完成
+
+---
+
+## 2026-01-30
+
+### 新增数据库内容导出工具
+
+#### 新增文件
+
+- `main/xiaozhi-server/migrations/export_database_content.py`
+
+#### 新增位置
+
+- `migrations/` 目录下新增独立脚本文件
+
+#### 变更内容
+
+新增数据库内容导出工具脚本，实现以下功能：
+
+1. **核心功能**：
+   - 读取智能门锁数据库（smart_doorlock）中所有表的数据
+   - 生成 Markdown 格式的汇总报告文档
+   - 支持 10 个数据表的完整导出
+
+2. **导出的数据表**：
+   - `persons` - 人员信息（姓名、关系、人脸编码、自定义问候语）
+   - `access_permissions` - 访问权限（权限类型、时间段、有效期、状态）
+   - `visit_records` - 访问记录（识别结果、是否允许、拒绝原因）
+   - `device_info` - 设备信息（设备ID、密码状态）
+   - `device_status` - 设备状态（电池、光照、门锁状态、灯光状态，最近50条）
+   - `device_events` - 设备事件（事件类型、参数，最近50条）
+   - `unlock_logs` - 开锁日志（开锁方式、用户ID、结果、失败次数，最近50条）
+   - `door_opened_logs` - 开门日志（开锁方式、开门来源，最近50条）
+   - `doorlock_users` - 门锁用户（指纹数、NFC卡数、人脸注册状态）
+   - `media_files` - 媒体文件（文件类型、路径、大小、时长，最近50条）
+
+3. **报告格式**：
+   - Markdown 表格展示数据
+   - 包含导出时间、数据库信息
+   - 提供数据统计汇总（人员总数、权限配置数、访问记录数等）
+   - 自动格式化日期时间字段
+
+4. **辅助方法**：
+   - `format_datetime(dt)` - 格式化日期时间为统一格式
+   - `export_database_content()` - 主导出逻辑
+
+5. **输出文件**：
+   - 报告保存路径：`docs/database_content_report.md`
+   - 自动创建目录（如不存在）
+
+#### 功能说明
+
+提供数据库内容快速导出和查看工具，便于开发调试、数据审查和问题排查。通过生成可读性强的 Markdown 报告，开发者可以快速了解数据库当前状态，无需直接连接数据库执行 SQL 查询。特别适用于：
+
+- 开发阶段的数据验证
+- 测试数据的快速查看
+- 数据迁移前后的对比
+- 问题排查时的数据快照
+
+#### 使用方法
+
+```bash
+# 在 xiaozhi-server 目录下执行
+cd main/xiaozhi-server
+python migrations/export_database_content.py
+```
+
+#### 配置说明
+
+脚本中的数据库配置（第 16-22 行）：
+
+```python
+config = {
+    'host': '127.0.0.1',
+    'port': 3306,
+    'user': 'root',
+    'password': '123456',
+    'database': 'smart_doorlock',
+    'pool_size': 5
+}
+```
+
+**注意**：使用前需根据实际环境修改数据库连接配置。
+
+#### 技术特点
+
+- 使用 `Database` 类的现有方法进行数据查询，保持代码一致性
+- 对大表（如 device_status、device_events）限制查询数量，避免内存溢出
+- 异常处理完善，导出失败时输出详细错误信息和堆栈跟踪
+- 支持中文字段和数据的正确显示
+
+#### 版本信息
+
+- 创建日期：2026-01-30
+- 脚本版本：v1.0
+- 依赖模块：`core.providers.doorlock.database.Database`
+
+---
+
+## 2026-01-30
+
+### 修复状态上报未转发给 App 的问题
+
+#### 修改文件
+
+- `main/xiaozhi-server/core/handle/textHandler/statusReportHandler.py`
+
+#### 修改位置
+
+- `StatusReportHandler` 类的 `handle` 方法（第 73 行）
+
+#### 修改时间
+
+- 2026-01-30
+
+#### 变更内容
+
+- 在数据库持久化之后、状态更新机制之前，新增调用 `_forward_to_apps` 方法
+- 新增代码：`await self._forward_to_apps(conn, msg_json)`
+- 添加注释说明："转发原始消息给 App（符合 App 协议 v2.3）"
+
+#### 功能说明
+
+修复代码与文档不一致问题 #1（参见 `docs/my_docs/code-vs-doc-inconsistencies.md`）。根据 App 协议 v2.3 第 7.1 节规范，ESP32 上报的 `status_report` 消息应该从服务器转发给所有关联的 App 客户端。原实现中 `_forward_to_apps` 方法已定义但未被调用，导致 App 端无法接收到原始状态消息，只能通过 `device_state_update` 消息接收状态。
+
+**修复后的行为**：
+
+1. ESP32 发送 `status_report` 消息
+2. 服务器解析并更新内存缓存（`conn.iot_descriptors`）
+3. 服务器持久化到数据库（`device_status` 表）
+4. **服务器转发原始消息给所有关联的 App**（新增）
+5. 服务器使用新的状态更新机制推送分类状态（`device_state_update`）
+
+**协议符合性**：
+
+- ✅ 符合 App 协议 v2.3 第 7.1 节（设备状态推送）
+- ✅ 与其他上报处理器保持一致（`eventReportHandler`、`logReportHandler` 都有转发）
+- ✅ 向后兼容，不影响现有 App
+
+**应用场景**：
+
+- App 可以同时接收原始 `status_report` 消息和分类后的 `device_state_update` 消息
+- 原始消息包含完整的上报数据（ts、data 等），便于 App 进行自定义处理
+- 分类消息提供结构化的状态数据，便于 App 快速更新 UI
+
+**相关文档**：
+
+- `docs/my_docs/code-vs-doc-inconsistencies.md` - 代码与文档不一致性分析报告（问题 #1）
+- `docs/my_docs/code-fix-recommendations.md` - 代码修复建议（问题 #1 修复方案）
+- `docs/my_docs/智能猫眼门锁系统-服务器与App通信协议规范-v2.3.md` - App 协议规范第 7.1 节
+
+**测试建议**：
+
+1. ESP32 发送 `status_report` 消息
+2. 验证 App 是否收到原始 `status_report` 消息
+3. 验证 App 是否同时收到 4 条 `device_state_update` 消息（light、door、battery、lux）
+4. 验证多个 App 同时连接时都能收到消息
+5. 验证消息内容完整性和格式正确性
+
+**修复优先级**：
+
+- 优先级：⭐⭐⭐ 高优先级
+- 影响范围：App 端状态显示功能
+- 修复时间：10 分钟
+- 风险等级：低（仅新增调用，不修改现有逻辑）
+
+**版本信息**：
+
+- 修复版本：v1.0
+- 修复日期：2026-01-30
+- 审核状态：已完成
+- 对应任务：`.kiro/specs/protocol-upgrade-v5.0-to-v5.2/tasks.md` 任务 14（修复代码与文档不一致）
+
+---
+
+## 2026-01-30 (更新 2)
+
+### 修改文件
+
+- `main/xiaozhi-server/core/app_connection.py`
+
+### 修改位置
+
+- 文件头部注释（第 1-9 行）
+
+### 修改时间
+
+- 2026-01-30
+
+### 变更内容
+
+- 协议版本从 v2.2 升级到 v2.4
+- 新增说明：统一使用 0-10 错误码体系
+- 新增说明：server_ack 简化为 0/3/8/9 四种状态
+- 删除说明：支持 server_ack 消息确认机制（功能保留，只是简化描述）
+- 保留说明：支持 app_id 身份标识、支持 seq_id 防重放
+
+### 功能说明
+
+标记 App 协议版本升级到 v2.4，为错误码体系统一化工作做准备。这是 `统一错误码修改计划.md` 阶段 2（代码注释更新）的一部分。
+
+**主要变更**：
+
+1. **协议版本升级**：v2.2 → v2.4
+   - 跳过 v2.3 版本号，直接升级到 v2.4
+   - v2.3 已用于 ESP32 协议升级文档
+
+2. **错误码体系统一**：
+   - 原：server_ack 使用 0-5 错误码，ESP32 ack 使用 0-10 错误码
+   - 新：统一使用 0-10 错误码体系
+   - server_ack 简化为 0/3/8/9 四种状态（成功、参数错误、未认证、重复消息）
+
+3. **文档简化**：
+   - 删除"支持 server_ack 消息确认机制"说明（功能保留，只是简化描述）
+   - 保留核心特性说明（app_id、seq_id）
+
+**后续工作**：
+
+根据 `统一错误码修改计划.md`，后续还需完成：
+
+1. **阶段 1：文档更新**（必须）
+   - ✅ 更新 App 协议文档 v2.3 → v2.4
+   - ✅ 创建修改说明文档（统一错误码修改计划.md）
+
+2. **阶段 2：代码注释更新**（推荐）
+   - ✅ 更新 app_connection.py 注释（本次变更）
+   - ⏳ 更新 commandProxyHandler.py 注释
+   - ⏳ 更新 error_codes.py 注释
+
+3. **阶段 3：代码逻辑优化**（可选）
+   - ⏳ 添加 server_ack 错误码验证
+   - ⏳ 创建单元测试
+
+4. **阶段 4：验证测试**（可选）
+   - ⏳ 手动测试
+   - ⏳ 集成测试
+
+**协议符合性**：
+
+- ✅ 符合 App 协议 v2.4 规范
+- ✅ 向后兼容 v2.2 和 v2.3
+- ✅ 与 ESP32 协议 v5.2 保持一致
+
+**相关文档**：
+
+- `docs/my_docs/统一错误码修改计划.md` - 错误码统一化修改计划
+- `docs/my_docs/app-data-processing-code-inconsistencies.md` - 代码与文档不一致性分析报告
+- `docs/my_docs/智能猫眼门锁系统-服务器与App通信协议规范-v2.4.md` - App 协议规范（待更新）
+
+**影响范围**：
+
+- 影响范围：App 连接处理器文档注释
+- 代码逻辑：无变更
+- 功能影响：无
+- 风险等级：极低（仅文档性修改）
+
+**版本信息**：
+
+- 修改版本：v2.4
+- 修改日期：2026-01-30
+- 审核状态：已完成
+- 对应任务：`统一错误码修改计划.md` 阶段 2 - 代码注释更新
+
+---
+
+## 2026-01-30 (更新 2)
+
+### 修改文件
+
+- `main/xiaozhi-server/core/constants/error_codes.py`
+
+### 修改位置
+
+- 文件头部注释（第 1-10 行）
+
+### 变更内容
+
+1. **协议版本更新**：
+   - 原：`统一错误码定义（v5.2）`
+   - 改：`统一错误码定义（v2.4）`
+
+2. **新增错误码使用场景说明**：
+   - server_ack：简化使用（0/3/8/9）- 只用于接收确认
+   - 业务响应：完整使用（0-10）- 用于命令执行结果
+   - ESP32 ack：完整使用（0-10）- 用于设备执行结果
+
+### 功能说明
+
+完善错误码定义的文档注释，明确三种场景下的错误码使用规范，与 App 协议 v2.4 的统一错误码体系保持一致。此变更是 `统一错误码修改计划.md` 阶段 2（代码注释更新）的一部分，通过注释说明不同场景下错误码的使用方式，帮助开发者正确使用错误码。
+
+**关键改进**：
+
+- 明确 server_ack 只使用 4 个错误码（0/3/8/9），用于快速确认消息接收状态
+- 业务响应和 ESP32 ack 使用完整的 0-10 错误码，用于详细的执行结果反馈
+- 与 App 协议 v2.4 规范保持一致
+
+**影响范围**：
+
+- 影响范围：错误码定义文件的文档注释
+- 代码逻辑：无变更
+- 功能影响：无
+- 风险等级：极低（仅文档性修改）
+
+**相关任务**：
+
+- 对应计划：`统一错误码修改计划.md` 阶段 2 - 代码注释更新
+- 已完成：✅ error_codes.py 注释更新
+- 待完成：⏳ commandProxyHandler.py 注释更新
+
+**版本信息**：
+
+- 协议版本：v2.4
+- 修改日期：2026-01-30
+- 审核状态：已完成
+
+---
+
+## 2026-02-01
+
+### 修改文件
+
+- `main/xiaozhi-server/core/providers/doorlock/database.py`
+
+### 修改位置
+
+- `Database` 类末尾（第 1333-1560 行），新增门锁用户管理 CRUD 方法组
+
+### 变更内容
+
+新增 6 个门锁用户管理相关的数据库操作方法：
+
+1. **`save_doorlock_user` 方法**：
+   - 保存或更新门锁用户（指纹/NFC/密码）
+   - 使用 `ON DUPLICATE KEY UPDATE` 实现 UPSERT 语义
+   - 支持软删除恢复（status 重置为 1）
+   - 参数：device_id, user_type, user_id, user_name, user_data, created_by
+   - 返回：插入的记录 ID
+
+2. **`_get_doorlock_user_id` 方法**（内部方法）：
+   - 获取门锁用户的数据库自增 ID
+   - 用于 UPSERT 操作后获取记录 ID
+
+3. **`delete_doorlock_user` 方法**：
+   - 软删除门锁用户（设置 status=0）
+   - 参数：device_id, user_type, user_id
+   - 返回：是否删除成功
+
+4. **`get_doorlock_user` 方法**：
+   - 获取单个门锁用户信息
+   - 只返回 status=1 的有效记录
+   - 自动转换 datetime 为字符串格式
+   - 返回：用户信息字典或 None
+
+5. **`query_doorlock_users` 方法**：
+   - 查询门锁用户列表（带分页）
+   - 支持按 user_type 过滤（可选）
+   - 按 user_type 和 user_id 排序
+   - 参数：device_id, user_type, limit, offset
+   - 返回：(记录列表, 总数)
+
+6. **`clear_doorlock_users` 方法**：
+   - 批量软删除指定类型的所有用户
+   - 参数：device_id, user_type
+   - 返回：删除的记录数
+
+### 功能说明
+
+为 `doorlock_users` 表提供完整的 CRUD 操作接口，实现指纹、NFC、密码三种类型用户的统一管理。采用软删除机制保留历史记录，支持按设备和用户类型查询，配合 `migrations/add_doorlock_users_table.sql` 迁移脚本实现门锁用户数据的持久化存储。
+
+**核心特性**：
+
+- **UPSERT 语义**：`save_doorlock_user` 使用 `ON DUPLICATE KEY UPDATE`，避免重复插入
+- **软删除**：删除操作只设置 status=0，保留历史数据便于审计
+- **类型统一**：指纹、NFC、密码用户使用同一张表管理，通过 user_type 字段区分
+- **分页查询**：支持大数据量场景下的分页加载
+- **批量清空**：支持一键清空某类型的所有用户（如清空所有指纹）
+
+**数据库表结构**（对应 `add_doorlock_users_table.sql`）：
+
+```sql
+CREATE TABLE doorlock_users (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    device_id VARCHAR(64) NOT NULL,
+    user_type VARCHAR(16) NOT NULL,  -- finger/nfc/password
+    user_id INT NOT NULL,             -- ESP32 分配的用户 ID
+    user_name VARCHAR(64),            -- 用户备注名称
+    user_data VARCHAR(255),           -- 额外数据（如 NFC 卡号）
+    status TINYINT DEFAULT 1,         -- 0=已删除，1=正常
+    created_at DATETIME,
+    updated_at DATETIME,
+    created_by VARCHAR(64),           -- 创建者 app_id
+    UNIQUE KEY uk_device_type_userid (device_id, user_type, user_id)
+);
+```
+
+**使用场景**：
+
+- 用户管理命令处理器（`UserMgmtProxyHandler`）调用这些方法同步 ESP32 的用户数据
+- App 查询接口（`QueryHandler`）调用这些方法返回用户列表
+- 开锁日志处理器（`LogReportHandler`）通过 user_id 关联用户信息
+
+**影响范围**：
+
+- 新增功能：门锁用户数据持久化存储
+- 依赖模块：需配合 `add_doorlock_users_table.sql` 迁移脚本创建表结构
+- 调用方：用户管理命令处理器、查询处理器、日志处理器
+- 风险等级：低（纯新增功能，不影响现有逻辑）
+
+**相关文件**：
+
+- 数据库迁移脚本：`main/xiaozhi-server/migrations/add_doorlock_users_table.sql`
+- 协议规范：`docs/my_docs/智能猫眼门锁系统-服务器与ESP32通信协议规范-v5.2.md`
+- 数据模型：`main/xiaozhi-server/core/providers/doorlock/models.py`
+
+**版本信息**：
+
+- 协议版本：v5.2
+- 修改日期：2026-02-01
+- 审核状态：已完成
+- 对应需求：智能门锁用户管理功能
+
+## 2026-02-01 (更新)
+
+### 修改文件
+
+- `main/xiaozhi-server/core/handle/textHandler/userMgmtResultHandler.py`
+
+### 修改位置
+
+- 文件头部 import 区域（第 9 行）
+- 新增 `_get_database` 辅助函数（第 13-22 行）
+- `UserMgmtResultHandler` 类的 `handle` 方法（第 58 行）
+- 新增 `_update_database` 方法（第 72-139 行）
+
+### 修改时间
+
+- 2026-02-01
+
+### 变更内容
+
+1. **新增导入语句**：
+   - `from core.handle.textHandler.faceRecognitionHandler import get_face_service`
+
+2. **新增 `_get_database` 辅助函数**：
+   - 通过 `get_face_service(conn.logger)` 获取 FaceService 实例
+   - 返回 `face_service.db` 数据库实例
+   - 异常时记录错误日志并返回 `None`
+
+3. **handle 方法增强**：
+   - 在用户管理成功后新增数据库更新调用
+   - 调用 `await self._update_database(conn, category, command, val, msg_json)`
+
+4. **新增 `_update_database` 方法**：
+   - 参数：conn（连接对象）、category（用户类型）、command（命令类型）、val（ESP32 返回值）、msg_json（完整消息）
+   - 从缓存中获取 user_name 和其他信息（通过 seq_id）
+   - 实现三种命令的数据库同步：
+     - **add 命令**：保存新用户到 doorlock_users 表
+     - **del 命令**：软删除用户（设置 status=0）
+     - **clear 命令**：批量软删除指定类型的所有用户
+   - 记录详细的操作日志（INFO 级别）
+   - 异常时记录 ERROR 日志
+
+### 功能说明
+
+实现用户管理操作结果的服务器端数据库同步。当 ESP32 上报用户管理操作成功后（如添加指纹、删除 NFC 卡、清空密码），服务器会自动将操作结果同步到 `doorlock_users` 表，实现设备端与服务器端的用户数据一致性。
+
+**核心功能**：
+
+1. **添加用户同步**：
+   - ESP32 返回分配的 user_id（指纹槽位 ID、NFC 卡 ID 等）
+   - 服务器保存到 doorlock_users 表，包含 user_name（用户备注）
+   - 记录 created_by（操作者 app_id）
+
+2. **删除用户同步**：
+   - 从缓存或消息中获取 user_id
+   - 调用 `db.delete_doorlock_user()` 软删除用户
+   - 保留历史记录便于审计
+
+3. **清空用户同步**：
+   - 批量软删除指定类型的所有用户
+   - 返回删除的记录数
+   - 记录操作日志
+
+**技术细节**：
+
+- **缓存机制**：从 `conn._pending_user_names[seq_id]` 获取 user_name 和 app_id
+- **软删除**：删除操作只设置 status=0，不物理删除记录
+- **异常处理**：数据库更新失败不影响转发给 App（记录错误日志）
+- **日志记录**：详细记录每次数据库操作的结果
+
+**应用场景**：
+
+1. App 发送 `user_mgmt` 命令添加指纹
+2. Server 转发给 ESP32，并缓存 user_name
+3. ESP32 返回 `user_mgmt_result` 消息（val=分配的指纹 ID）
+4. Server 更新数据库并转发给 App
+5. 后续 App 查询用户列表时可从数据库获取
+
+**相关功能**：
+
+- 配合 `commandProxyHandler.py` 中的 user_name 缓存逻辑
+- 配合 `database.py` 中的 doorlock_users CRUD 方法
+- 支持 App 协议 v2.4 的用户管理功能
+- 与 ESP32 协议 v5.2 的 `user_mgmt_result` 消息对应
+
+**相关文档**：
+
+- `docs/my_docs/智能猫眼门锁系统-服务器与App通信协议规范-v2.4.md` - App 协议规范
+- `docs/my_docs/智能猫眼门锁系统-ESP32与服务器通信协议规范-v5.2.md` - ESP32 协议规范
+- `main/xiaozhi-server/migrations/add_doorlock_users_table.sql` - 数据库表结构
+
+**测试建议**：
+
+1. 验证添加指纹后数据库正确保存用户记录
+2. 验证删除 NFC 卡后数据库正确软删除记录
+3. 验证清空密码后数据库批量软删除所有密码用户
+4. 验证数据库更新失败时仍能正常转发给 App
+5. 验证 user_name 正确从缓存中获取并保存
+6. 验证操作日志正确记录（成功/失败）
+
+**版本信息**：
+
+- 修改版本：v1.0
+- 修改日期：2026-02-01
+- 审核状态：已完成
+- 对应任务：用户管理结果数据库同步功能实现
+
+---
+
+## 2026-02-01 (更新)
+
+### 新增文件
+
+**文件路径**：`main/xiaozhi-server/migrations/run_add_doorlock_users.py`
+
+**修改位置**：新增完整文件（158 行）
+
+**修改时间**：2026-02-01
+
+**变更内容**：
+
+1. 新增数据库迁移执行脚本，用于自动创建 doorlock_users 表
+2. 实现 SQL 脚本读取和执行功能
+3. 添加表创建验证和结构展示功能
+4. 实现完整的错误处理和日志记录机制
+
+**核心功能**：
+
+- **SQL 脚本执行**：读取 `add_doorlock_users_table.sql` 并按语句分割执行
+- **智能解析**：自动跳过注释行，按分号分割 SQL 语句
+- **验证机制**：执行后验证表是否创建成功，并显示表结构
+- **日志输出**：使用 loguru 记录详细的执行过程和结果
+- **异步实现**：使用 aiomysql 异步连接数据库
+- **错误处理**：捕获并记录执行失败的语句和错误信息
+
+**主要函数**：
+
+1. `execute_migration()` - 异步执行数据库迁移
+   - 读取 SQL 脚本文件
+   - 连接数据库
+   - 分割并执行 SQL 语句
+   - 验证表创建结果
+   - 显示表结构
+
+2. `main()` - 主函数
+   - 显示数据库配置信息
+   - 调用迁移执行函数
+   - 输出执行结果
+
+**使用方法**：
+
+```bash
+python migrations/run_add_doorlock_users.py
+```
+
+**依赖要求**：
+
+- aiomysql：异步 MySQL 连接库
+- loguru：日志记录库
+- config.settings：数据库配置
+
+**相关文件**：
+
+- `main/xiaozhi-server/migrations/add_doorlock_users_table.sql` - SQL 脚本文件
+- `main/xiaozhi-server/config/settings.py` - 数据库配置
+
+**版本信息**：
+
+- 创建版本：v1.0
+- 创建日期：2026-02-01
+- 审核状态：已完成
+- 对应任务：门锁用户表数据库迁移脚本
+
+---
+
+## 2026-02-01 (更新 2)
+
+### 修改文件
+
+**文件路径**：`main/xiaozhi-server/core/providers/doorlock/database.py`
+
+**修改位置**：`Database` 类的 `_init_database` 方法中的 `doorlock_users` 表创建语句（第 194-212 行）
+
+**修改时间**：2026-02-01
+
+**变更内容**：
+
+将 `doorlock_users` 表结构从基于用户维度（使用 JSON 存储指纹/NFC ID）改为基于认证方式维度的统一表结构：
+
+1. **字段变更**：
+   - 移除：`name`、`role`、`finger_ids`（JSON）、`nfc_ids`（JSON）、`face_registered`
+   - 新增：`user_type`（用户类型：finger/nfc/password）
+   - 新增：`user_name`（用户备注名称）
+   - 新增：`user_data`（额外数据，如 NFC 卡号）
+   - 新增：`status`（状态：0=已删除，1=正常）
+   - 新增：`created_by`（创建者 app_id）
+
+2. **约束变更**：
+   - 原唯一键：`uk_device_user (device_id, user_id)`
+   - 新唯一键：`uk_device_type_userid (device_id, user_type, user_id)`
+
+3. **索引优化**：
+   - 新增索引：`idx_device_id`、`idx_user_type`、`idx_status`、`idx_created_at`
+
+4. **注释完善**：
+   - 所有字段添加 COMMENT 说明
+   - 表添加 COMMENT：'门锁用户表（统一管理指纹、NFC、密码）'
+
+**功能说明**：
+
+实现 App 协议 v2.4 的门锁用户管理功能，统一管理指纹、NFC、密码用户的元数据。新表结构支持以下特性：
+
+1. **统一管理**：
+   - 一条记录对应一个认证凭证（一个指纹、一张 NFC 卡、一个密码）
+   - 通过 `user_type` 字段区分凭证类型
+   - 通过 `user_id` 字段存储 ESP32 分配的槽位 ID
+
+2. **用户备注**：
+   - `user_name` 字段存储用户自定义的备注名称
+   - 例如："张三的右手食指"、"李四的门禁卡"
+   - 便于用户识别和管理
+
+3. **软删除机制**：
+   - `status` 字段：1=正常，0=已删除
+   - 删除操作只设置 status=0，不物理删除记录
+   - 保留历史记录便于审计和数据恢复
+
+4. **操作追踪**：
+   - `created_by` 字段记录创建者的 app_id
+   - 支持多用户场景下的操作审计
+   - 便于追溯用户添加来源
+
+5. **扩展数据**：
+   - `user_data` 字段存储额外信息
+   - NFC 卡可存储卡号
+   - 密码可存储哈希值（预留）
+
+**数据示例**：
+
+```sql
+-- 指纹用户
+INSERT INTO doorlock_users (device_id, user_type, user_id, user_name, created_by)
+VALUES ('AA:BB:CC:DD:EE:FF', 'finger', 5, '张三的右手食指', 'user_12345');
+
+-- NFC 用户
+INSERT INTO doorlock_users (device_id, user_type, user_id, user_name, user_data, created_by)
+VALUES ('AA:BB:CC:DD:EE:FF', 'nfc', 3, '李四的门禁卡', '1234567890ABCDEF', 'user_12345');
+
+-- 密码用户
+INSERT INTO doorlock_users (device_id, user_type, user_id, user_name, created_by)
+VALUES ('AA:BB:CC:DD:EE:FF', 'password', 1, '主密码', 'user_12345');
+```
+
+**查询示例**：
+
+```sql
+-- 查询设备的所有指纹用户
+SELECT * FROM doorlock_users
+WHERE device_id = 'AA:BB:CC:DD:EE:FF'
+  AND user_type = 'finger'
+  AND status = 1
+ORDER BY created_at DESC;
+
+-- 查询设备的所有用户（包括已删除）
+SELECT * FROM doorlock_users
+WHERE device_id = 'AA:BB:CC:DD:EE:FF'
+ORDER BY user_type, user_id;
+```
+
+**与旧表结构的对比**：
+
+| 特性     | 旧表结构                       | 新表结构                         |
+| -------- | ------------------------------ | -------------------------------- |
+| 数据组织 | 按用户维度（一个用户多个凭证） | 按凭证维度（一个凭证一条记录）   |
+| 指纹存储 | JSON 数组 `finger_ids`         | 独立记录，`user_type='finger'`   |
+| NFC 存储 | JSON 数组 `nfc_ids`            | 独立记录，`user_type='nfc'`      |
+| 密码存储 | 无                             | 独立记录，`user_type='password'` |
+| 用户备注 | `name` 字段（用户名）          | `user_name` 字段（凭证备注）     |
+| 删除方式 | 物理删除                       | 软删除（status=0）               |
+| 操作追踪 | 无                             | `created_by` 字段                |
+| 查询效率 | 需解析 JSON                    | 直接索引查询                     |
+
+**迁移影响**：
+
+- ⚠️ **不兼容旧数据**：新表结构与旧表结构不兼容，需要数据迁移
+- ✅ **向后兼容**：新代码通过 `auto_init=False` 参数可跳过自动建表
+- ✅ **迁移脚本**：提供独立的迁移脚本 `migrations/add_doorlock_users_table.sql`
+- ✅ **执行脚本**：提供自动化执行脚本 `migrations/run_add_doorlock_users.py`
+
+**相关功能**：
+
+- 配合 `database.py` 中的 CRUD 方法（save_doorlock_user、delete_doorlock_user 等）
+- 配合 `userMgmtResultHandler.py` 中的数据库同步逻辑
+- 配合 `queryHandler.py` 中的用户列表查询功能
+- 支持 App 协议 v2.4 的用户管理功能
+
+**相关文档**：
+
+- `docs/my_docs/智能猫眼门锁系统-服务器与App通信协议规范-v2.4.md` - App 协议规范（第 5.6 节、第 9.7 节）
+- `docs/my_docs/doorlock-user-management-implementation.md` - 用户管理功能实现报告
+- `main/xiaozhi-server/migrations/add_doorlock_users_table.sql` - SQL 迁移脚本
+- `main/xiaozhi-server/migrations/run_add_doorlock_users.py` - 迁移执行脚本
+
+**测试建议**：
+
+1. 验证表创建成功（运行迁移脚本）
+2. 验证唯一键约束生效（重复插入应失败）
+3. 验证索引创建成功（SHOW INDEX FROM doorlock_users）
+4. 验证软删除机制（UPDATE status=0 后查询不返回）
+5. 验证多设备数据隔离（不同 device_id 的数据独立）
+6. 验证多类型用户共存（finger/nfc/password 可同时存在）
+
+**版本信息**：
+
+- 修改版本：v2.4
+- 修改日期：2026-02-01
+- 审核状态：已完成
+- 对应任务：门锁用户表结构升级（v2.4 协议适配）
+- 相关 Issue：统一管理指纹、NFC、密码用户元数据
+
+---
+
+## 2026-02-01
+
+### 新增数据库迁移脚本（简化版）
+
+#### 新增文件
+
+- `main/xiaozhi-server/migrations/run_add_doorlock_users_simple.py`
+
+#### 变更内容
+
+**新增完整的数据库迁移执行脚本**：
+
+1. **主要功能**：
+   - 自动读取并执行 `add_doorlock_users_table.sql` 脚本
+   - 智能分割 SQL 语句（按分号分割，自动忽略注释）
+   - 逐条执行 SQL 语句并显示执行进度
+   - 验证表创建是否成功
+   - 显示表结构详情
+
+2. **核心方法**：
+   - `execute_migration()`: 执行数据库迁移的主逻辑
+     - 从 `config.yaml` 读取数据库配置
+     - 连接 MySQL 数据库
+     - 分割并执行 SQL 语句
+     - 验证 `doorlock_users` 表是否创建成功
+     - 显示表结构（字段、类型、约束等）
+   - `main()`: 主函数
+     - 显示数据库配置信息
+     - 调用迁移执行函数
+     - 输出友好的成功/失败提示
+
+3. **错误处理**：
+   - 配置文件读取失败处理
+   - SQL 文件不存在检查
+   - 数据库连接错误捕获
+   - SQL 语句执行失败详细日志
+   - 完整的异常堆栈输出
+
+4. **用户体验优化**：
+   - 使用 emoji 图标（✅/❌）增强可读性
+   - 显示执行进度（语句 X/总数）
+   - SELECT 查询结果自动展示（最多显示前 5 行）
+   - 表结构格式化输出
+   - 清晰的分隔线和标题
+
+#### 功能说明
+
+提供了一个简化版的数据库迁移工具，用于自动化执行门锁用户表（`doorlock_users`）的创建和验证。相比完整版迁移脚本，此版本：
+
+- **更轻量**：无需额外依赖，直接使用 `mysql.connector`
+- **更简单**：专注于单个 SQL 文件的执行
+- **更直观**：提供清晰的命令行输出和进度提示
+- **更安全**：包含完整的错误处理和回滚机制
+
+#### 使用方法
+
+```bash
+cd main/xiaozhi-server
+python migrations/run_add_doorlock_users_simple.py
+```
+
+#### 输出示例
+
+```
+============================================================
+数据库迁移：添加门锁用户表
+============================================================
+
+数据库配置:
+  Host: 127.0.0.1
+  Port: 3306
+  Database: smart_doorlock
+  User: root
+
+开始执行数据库迁移...
+SQL 脚本: /path/to/add_doorlock_users_table.sql
+执行语句 1/3...
+执行语句 2/3...
+执行语句 3/3...
+✅ 数据库迁移执行成功！
+✅ doorlock_users 表创建成功
+
+表结构:
+--------------------------------------------------------------------------------
+  id              BIGINT               NO    PRI   None
+  device_id       VARCHAR(64)          NO    MUL   None
+  user_type       VARCHAR(16)          NO    MUL   None
+  user_id         INT                  NO          None
+  user_name       VARCHAR(64)          YES         None
+  user_data       VARCHAR(255)         YES         None
+  status          TINYINT              YES   MUL   1
+  created_at      DATETIME             YES   MUL   CURRENT_TIMESTAMP
+  updated_at      DATETIME             YES         CURRENT_TIMESTAMP
+  created_by      VARCHAR(64)          YES         None
+--------------------------------------------------------------------------------
+============================================================
+✅ 迁移完成！
+============================================================
+```
+
+#### 技术特性
+
+- 使用 `mysql.connector` 进行数据库操作
+- 从 `config.yaml` 动态读取数据库配置
+- 智能 SQL 语句分割（支持多行语句、注释过滤）
+- 事务提交确保数据一致性
+- 字典游标（`dictionary=True`）便于结果处理
+- 完整的资源清理（`finally` 块关闭连接）
+
+#### 相关文件
+
+- SQL 脚本：`main/xiaozhi-server/migrations/add_doorlock_users_table.sql`
+- 配置加载：`main/xiaozhi-server/config/config_loader.py`
+- 实现文档：`docs/my_docs/doorlock-user-management-implementation.md`
+
+---
+
+## 2026-02-01
+
+### 新增数据库迁移执行脚本
+
+#### 新增文件
+
+- `main/xiaozhi-server/migrations/run_add_doorlock_users.py`
+
+#### 变更内容
+
+**新增完整的数据库迁移执行脚本（200 行）**：
+
+1. **配置加载功能**（第 21-40 行）：
+   - `get_database_config()` 函数：自动从 config.yaml 加载数据库配置
+   - 支持环境变量回退（DB_HOST、DB_PORT、DB_USER、DB_PASSWORD、DB_NAME）
+   - 提供友好的配置缺失提示
+
+2. **迁移执行功能**（第 43-195 行）：
+   - `run_migration()` 函数：执行完整的迁移流程
+   - **步骤 1**：检查 doorlock_users 表是否已存在
+   - **步骤 2**：验证表结构版本（检查 user_type 字段）
+   - **步骤 3**：创建 v2.4 版本的 doorlock_users 表
+   - **步骤 4**：验证表结构（显示所有字段）
+   - **步骤 5**：验证索引（显示所有索引）
+
+3. **智能检测逻辑**：
+   - 如果表已存在且是最新版本，跳过迁移并显示表结构
+   - 如果表是旧版本，提示用户备份并升级
+   - 如果表不存在，创建新表
+
+4. **错误处理**：
+   - 捕获 MySQL 连接错误并提供详细的故障排查步骤
+   - 捕获通用异常并打印完整堆栈跟踪
+   - 返回布尔值表示迁移成功或失败
+
+5. **日志输出**：
+   - 使用 loguru 记录详细的执行日志
+   - 使用表情符号（✓、⚠、✗）增强可读性
+   - 显示表结构和索引的格式化输出
+
+#### 功能说明
+
+实现门锁用户管理功能的数据库迁移自动化脚本，提供以下特性：
+
+- **自动化执行**：一键运行完成表创建和验证
+- **智能检测**：自动识别表状态，避免重复迁移
+- **版本管理**：支持检测表版本，提示升级路径
+- **配置灵活**：支持从配置文件或环境变量读取数据库连接
+- **友好提示**：提供详细的执行日志和错误排查建议
+- **安全可靠**：包含完整的错误处理和回滚机制
+
+#### 使用方法
+
+```bash
+cd main/xiaozhi-server
+python migrations/run_add_doorlock_users.py
+```
+
+#### 相关文件
+
+- SQL 脚本：`main/xiaozhi-server/migrations/add_doorlock_users_table.sql`
+- 简化版脚本：`main/xiaozhi-server/migrations/run_add_doorlock_users_simple.py`
+- 数据库模块：`main/xiaozhi-server/core/providers/doorlock/database.py`
+- 实现文档：`docs/my_docs/doorlock-user-management-implementation.md`
+
+---
+
+## 2026-02-01
+
+### 数据库迁移脚本配置加载优化
+
+#### 修改文件
+
+- `main/xiaozhi-server/migrations/run_add_doorlock_users.py`
+
+#### 修改位置
+
+- `get_database_config()` 函数（第 21-50 行）
+
+#### 变更内容
+
+1. **移除 config_loader 依赖**：
+   - 原：`from config.config_loader import load_config`
+   - 改：直接使用 `yaml.safe_load()` 读取配置文件
+
+2. **直接读取配置文件**：
+   - 使用 `yaml` 库直接读取 `config/face_recognition_config.yaml`
+   - 从 `database` 字段获取数据库配置（而非 `mysql` 字段）
+   - 添加配置文件路径日志输出
+
+3. **修改默认密码**：
+   - 原：`'password': os.getenv('DB_PASSWORD', '')`
+   - 改：`'password': os.getenv('DB_PASSWORD', '123456')`
+
+#### 功能说明
+
+优化数据库迁移脚本的配置加载逻辑，解决以下问题：
+
+1. **避免循环依赖**：移除对 `config.config_loader` 的依赖，避免迁移脚本执行时可能出现的模块导入问题
+2. **独立运行能力**：迁移脚本现在可以独立运行，不依赖项目的其他模块
+3. **配置兼容性**：直接读取 `face_recognition_config.yaml` 中的 `database` 配置，与 `Database` 类的配置格式保持一致
+4. **更合理的默认值**：默认密码从空字符串改为 `'123456'`，与项目其他部分的默认配置保持一致
+
+这次优化使得迁移脚本更加健壮和易于维护，可以在不同环境下独立执行。
+
+---
+
+## 2026-02-01
+
+### 监控模式录像功能默认启用
+
+#### 修改文件
+
+- `main/xiaozhi-server/core/handle/textHandler/systemMessageHandler.py`
+
+#### 修改位置
+
+- `SystemTextMessageHandler` 类的 `handle` 方法（第 24 行）
+
+#### 变更内容
+
+- 修改监控模式启动时的录像默认行为
+- 原：`enable_recording = msg_json.get("record", False)` - 默认不启用录像
+- 改：`enable_recording = msg_json.get("record", True)` - 默认启用录像
+- 更新注释说明：从"默认不启用，避免性能影响"改为"默认启用"
+
+#### 功能说明
+
+调整监控模式的默认行为，现在启动监控时默认会同时启用录像保存功能。这样可以确保监控期间的视频数据被自动保存，便于后续回看和审计。如果不需要录像，可以在启动监控命令中显式设置 `"record": false` 来禁用。
+
+**使用示例**：
+
+```json
+// 启动监控（默认启用录像）
+{"type": "system", "command": "start_monitor"}
+
+// 启动监控（显式禁用录像）
+{"type": "system", "command": "start_monitor", "record": false}
+```
+
+**影响**：
+
+- ✅ 监控数据默认被保存，提高安全性
+- ⚠️ 会增加服务器存储空间占用
+- ⚠️ 会增加一定的 CPU 和内存开销（后台视频合成）
+
+**建议**：
+
+- 定期清理过期录像文件（可使用 `Database.cleanup_old_data()` 方法）
+- 监控存储空间使用情况
+- 根据实际需求调整录像保留策略
+
+#### 相关文件
+
+- 录像处理器：`main/xiaozhi-server/core/providers/doorlock/video_recorder.py`
+- 监控数据处理：`main/xiaozhi-server/core/connection.py` 的 `_handle_monitor_data` 方法
+- 协议文档：`docs/my_docs/智能猫眼门锁系统-服务器与ESP32通信协议规范-v5.2.md` 第 3.3.5 节
+
+---
+
+## 2026-02-09
+
+### 文件变更检测
+
+#### 修改文件
+
+- `main/xiaozhi-server/migrations/run_doorlock_ai_migration.py`
+
+#### 修改位置
+
+- 无实质性代码变更
+
+#### 修改时间
+
+- 2026-02-09
+
+#### 变更内容
+
+- 文件被编辑器打开或保存，但 diff 显示为空
+- 无代码行的增加、删除或修改
+- 可能是格式化操作或编辑器自动保存
+
+#### 功能说明
+
+此次变更为编辑器操作，未包含任何实质性的代码修改。文件内容保持不变，功能无影响。这是一次空提交（empty commit），通常由以下原因导致：
+
+- 编辑器自动保存功能触发
+- 文件被打开后未修改直接保存
+- 代码格式化工具运行但未发现需要格式化的内容
+- Git 操作（如 `git add` 后未实际修改）
+
+**影响范围**：无
+
+**测试建议**：无需测试
+
+**版本信息**：
+
+- 文件版本：保持不变
+- 修改日期：2026-02-09
+- 审核状态：无需审核（空变更）
+
+---
+
+## 2026-02-09
+
+### 文件变更检测
+
+#### 修改文件
+
+- `main/xiaozhi-server/core/providers/doorlock/doorlock_tools.py`
+
+#### 修改位置
+
+- 无实质性代码变更
+
+#### 修改时间
+
+- 2026-02-09
+
+#### 变更内容
+
+- 文件被编辑器打开或保存，但 diff 显示为空
+- 无代码行的增加、删除或修改
+- 可能是格式化操作或编辑器自动保存
+
+#### 功能说明
+
+此次变更为编辑器操作，未包含任何实质性的代码修改。文件内容保持不变，功能无影响。这是一次空提交（empty commit），通常由以下原因导致：
+
+- 编辑器自动保存功能触发
+- 文件被打开后未修改直接保存
+- 代码格式化工具运行但未发现需要格式化的内容
+- 换行符或空格的微小调整
+
+**影响范围**：无
+
+**测试建议**：无需测试
+
+**文件说明**：
+
+`doorlock_tools.py` 是智能门锁AI工具函数模块，提供以下5个工具函数供VLLM调用：
+
+1. `enable_package_guard` - 启用快递看护模式
+2. `disable_package_guard` - 关闭快递看护模式
+3. `update_package_baseline` - 更新看护基准图片
+4. `report_package_status` - 报告快递状态和威胁等级
+5. `report_visitor_intent` - 报告访客意图
+
+每个工具函数都定义了完整的JSON Schema，支持参数验证、错误处理和日志记录。
+
+**版本信息**：
+
+- 文件版本：保持不变
+- 修改日期：2026-02-09
+- 审核状态：无需审核（空变更）
+
+---
+
+### 文件变更检测
+
+#### 修改文件
+
+- `main/xiaozhi-server/core/api/doorlock_config_handler.py`
+
+#### 修改位置
+
+- 无实质性代码变更
+
+#### 修改时间
+
+- 2026-02-09
+
+#### 变更内容
+
+- 文件被编辑器打开或保存，但 diff 显示为空
+- 无代码行的增加、删除或修改
+- 可能是格式化操作或编辑器自动保存
+
+#### 功能说明
+
+此次变更为编辑器操作，未包含任何实质性的代码修改。文件内容保持不变，功能无影响。这是一次空提交（empty commit），通常由以下原因导致：
+
+- 编辑器自动保存功能触发
+- 文件被打开后未修改直接保存
+- 代码格式化工具运行但未发现需要格式化的内容
+- 换行符或空格的微小调整
+
+**影响范围**：无
+
+**测试建议**：无需测试
+
+**文件说明**：
+
+`doorlock_config_handler.py` 是智能门锁配置API处理器，提供设备配置的查询和更新接口：
+
+1. **查询配置** (`GET /api/doorlock/config`)
+   - 获取指定设备的完整配置信息
+   - 包括欢迎词、快递看护、访客意图识别等配置
+
+2. **更新配置** (`POST /api/doorlock/config`)
+   - 更新设备配置（支持部分更新）
+   - 自动验证配置参数的有效性
+   - 返回更新后的完整配置
+
+该模块是门锁AI功能的配置管理核心，支持动态配置调整而无需重启服务。
+
+**版本信息**：
+
+- 文件版本：保持不变
+- 修改日期：2026-02-09
+- 审核状态：无需审核（空变更）
+
+---
+
+## 2026-02-09 修复数据库配置传递错误
+
+### 修改文件
+
+- `main/xiaozhi-server/core/api/doorlock_config_handler.py`
+
+### 修改位置
+
+- `DoorlockConfigHandler.__init__` 方法(第 20 行)
+
+### 变更内容
+
+- 修改数据库初始化参数传递方式
+- 从传递完整 `config` 字典改为只传递 `config.get('mysql', {})` MySQL 配置段
+- 添加注释说明配置传递逻辑
+
+### 实现功能
+
+修复数据库配置传递错误。确保 `DoorlockDatabase` 类接收正确的 MySQL 配置参数(host、port、user、password、database、pool_size),而不是整个系统配置字典,避免配置解析错误。
+
+### 技术细节
+
+- 使用 `config.get('mysql', {})` 安全获取 MySQL 配置段
+- 如果配置中没有 mysql 段,返回空字典作为默认值
+- 提高代码健壮性和配置传递的准确性
+
+## 2026-02-09 23:45 - 修复数据库初始化参数错误
+
+**修改文件：**
+
+- `main/xiaozhi-server/core/handle/doorlock_intent_handler.py`
+
+**修改位置：**
+
+- `DoorlockIntentHandler.create_from_config()` 类方法
+- 第49行：DoorlockDatabase 实例化
+
+**变更内容：**
+
+```python
+# 修改前
+doorlock_database = DoorlockDatabase(logger_instance)
+
+# 修改后
+doorlock_database = DoorlockDatabase(config.get('mysql', {}))
+```
+
+**功能说明：**
+
+- 修复了数据库初始化参数错误的 bug
+- 正确传递 MySQL 配置字典（包含 host、port、user、password、database、pool_size）
+- 之前错误地传递了 logger_instance，导致数据库连接失败
+- 此修复确保 DoorlockDatabase 能够正确初始化连接池并连接到 MySQL 数据库
+
+**影响范围：**
+
+- 智能门锁 AI 意图识别功能的数据库操作
+- 访客意图记录、快递警报记录、设备配置等数据持久化功能
+
+**相关问题：**
+
+- 解决了启动时出现的 "Access denied for user 'root'@'172.17.0.1' (using password: NO)" 错误
+- 参考文档：`docs/my_docs/database-configuration-guide.md`
+
+## 2026-02-09 23:50 - 修复测试文件中的数据库初始化参数
+
+**修改文件**: `main/xiaozhi-server/test_doorlock_api.py`
+
+**修改位置**: `test_doorlock_history_handler()` 函数中的数据库初始化部分
+
+**变更内容**:
+
+- 将 `DoorlockDatabase(config.get('mysql', {}))` 改为 `DoorlockDatabase(config)`
+- 删除了过时的注释
+
+**功能说明**: 统一数据库初始化接口，使 `DoorlockDatabase` 类接收完整的配置对象而不是仅接收 mysql 配置段，与 `doorlock_intent_handler.py` 等其他模块保持一致
+
+## 2026-02-09 23:52 - 文件保存事件（无实际变更）
+
+**文件**: `main/xiaozhi-server/core/providers/doorlock/doorlock_database.py`
+
+**变更内容**: 文件被保存，但 diff 显示无实际代码变更（可能是编辑器自动保存或格式化触发）
+
+**说明**: 此次变更未包含实际的代码修改，仅记录文件编辑事件
+
+---
+
+## 2026-02-12 - OpenAI LLM 错误处理优化
+
+### 修改文件
+
+- `main/xiaozhi-server/core/providers/llm/openai/openai.py`
+
+### 修改位置
+
+- `OpenAIProvider` 类的 `function_call_streaming` 方法
+- 异常处理块（第 143-146 行）
+
+### 变更内容
+
+- 在异常处理块中新增 `error_msg` 变量，提取异常信息字符串
+- 将日志记录和错误响应中的异常对象改为使用 `error_msg` 字符串
+- 修改前：直接使用 `{e}` 格式化异常对象
+- 修改后：使用 `str(e)` 提取异常信息并存储到 `error_msg` 变量
+
+### 实现功能
+
+优化 OpenAI 服务异常处理的代码结构。通过显式提取异常信息字符串，提高代码可读性和可维护性。确保日志记录和用户错误提示中显示清晰的错误信息，便于问题排查和调试。
+
+### 技术细节
+
+- 使用 `str(e)` 显式转换异常对象为字符串
+- 避免在多处重复进行异常对象到字符串的隐式转换
+- 保持错误信息的一致性和可追溯性
+
+---
+
+## 2026-02-12 (更新) - 门锁看护 API 处理器延迟初始化优化
+
+### 修改文件
+
+- `main/xiaozhi-server/core/api/doorlock_guard_handler.py`
+
+### 修改位置
+
+- `DoorlockGuardHandler` 类的 `__init__` 方法（第 27-32 行）
+- 新增 `_ensure_initialized` 方法（第 34-57 行）
+- 新增 `guard_manager` 属性方法（第 59-63 行）
+
+### 变更内容
+
+1. **延迟初始化机制**：
+   - 将 `PackageGuardManager` 的初始化逻辑从构造函数移到 `_ensure_initialized` 方法
+   - 新增 `_initialized` 标志和 `_guard_manager` 私有变量
+   - 构造函数中仅初始化数据库服务，其他依赖延迟加载
+
+2. **新增 `_ensure_initialized` 方法**：
+   - 检查 `_initialized` 标志，避免重复初始化
+   - 初始化通知服务、VLLM 提供者、TTS 提供者
+   - 加载门锁独立配置文件 `doorlock_config.yaml`
+   - 创建 `PackageGuardManager` 实例
+   - 添加异常处理和日志记录
+
+3. **新增 `guard_manager` 属性**：
+   - 使用 `@property` 装饰器实现属性访问
+   - 自动触发延迟初始化
+   - 返回 `_guard_manager` 实例
+
+### 实现功能
+
+实现门锁看护管理器的延迟初始化模式（Lazy Initialization Pattern）。避免在 API 处理器构造时立即初始化所有依赖服务（VLLM 提供者、通知服务等），只在首次实际调用看护模式 API 时才进行初始化。
+
+### 技术优势
+
+- **提升启动性能**：减少服务启动时的初始化开销
+- **降低资源占用**：未使用看护功能时不占用 VLLM 等资源
+- **改善错误隔离**：看护模块初始化失败不影响其他 API 功能
+- **保持接口兼容**：通过属性方法保持原有的 `self.guard_manager` 访问方式
+
+---
+
+## 2026-02-12 (更新 2) - 修复服务器退出时的任务清理逻辑
+
+### 修改文件
+
+- `main/xiaozhi-server/app.py`
+
+### 修改位置
+
+- `main` 函数的 `finally` 块（第 146-152 行）
+- 文件末尾新增 `if __name__ == "__main__"` 块（第 155-159 行）
+
+### 变更内容
+
+1. **完善任务清理逻辑**：
+   - 补全被截断的注释："等待任务终止（必须加超时）"
+   - 新增 `asyncio.wait()` 调用，等待所有任务（stdin_task、ws_task、ota_task）完成
+   - 设置 3 秒超时，使用 `return_when=asyncio.ALL_COMPLETED` 参数
+   - 根据 `ota_task` 是否存在动态构建任务列表
+   - 新增退出提示："服务器已关闭，程序退出。"
+
+2. **新增主程序入口**：
+   - 添加 `if __name__ == "__main__":` 标准入口
+   - 使用 `try-except` 捕获 `KeyboardInterrupt` 异常
+   - 提供友好的手动中断提示："手动中断，程序终止。"
+
+### 实现功能
+
+修复服务器退出时的资源清理问题，确保所有异步任务（标准输入监控、WebSocket 服务器、HTTP 服务器）在程序退出前正确终止。通过添加超时机制避免任务清理时的无限等待，提升程序退出的可靠性和响应速度。
+
+### 技术细节
+
+- **优雅关闭**：使用 `cancel()` 取消任务后，通过 `asyncio.wait()` 等待任务实际终止
+- **超时保护**：设置 3 秒超时避免僵尸任务阻塞程序退出
+- **条件任务列表**：根据 `ota_task` 是否存在动态构建等待列表，避免 None 值导致的错误
+- **异常处理**：在主入口捕获 `KeyboardInterrupt`，提供清晰的用户反馈
+
+### 解决的问题
+
+- 修复了服务器退出时可能出现的任务未正确清理导致的进程残留问题
+- 避免了 `asyncio.wait()` 因缺少超时而无限等待的风险
+- 改善了 Ctrl+C 中断时的用户体验，提供明确的退出提示
+
+---
+
+## 2026-02-12 (更新 3) - HTTP 服务器门锁 API 处理器延迟初始化
+
+### 修改文件
+
+- `main/xiaozhi-server/core/http_server.py`
+
+### 修改位置
+
+- `SimpleHttpServer` 类的 `__init__` 方法（第 16-22 行）
+- 新增 `_init_doorlock_handlers` 方法（第 24-46 行）
+
+### 变更内容
+
+1. **新增延迟初始化标志和私有变量**：
+   - `_doorlock_handlers_initialized`: 标记门锁处理器是否已初始化
+   - `_image_upload_handler`: 图片上传处理器
+   - `_doorlock_config_handler`: 门锁配置处理器
+   - `_doorlock_guard_handler`: 门锁看护模式处理器
+   - `_doorlock_welcome_handler`: 门锁欢迎词处理器
+   - `_doorlock_history_handler`: 门锁历史记录处理器
+
+2. **新增 `_init_doorlock_handlers` 方法**：
+   - 检查 `_doorlock_handlers_initialized` 标志，避免重复初始化
+   - 动态导入 5 个门锁 API 处理器类
+   - 实例化所有处理器并传入配置
+   - 添加异常处理和日志记录
+   - 初始化成功后设置标志为 True
+
+### 实现功能
+
+为 HTTP 服务器实现门锁 API 处理器的延迟初始化机制。避免在服务器启动时立即加载和初始化所有门锁相关的 API 处理器，只在首次需要使用门锁 API 时才进行初始化。
+
+### 技术优势
+
+- **加速启动**：减少服务器启动时的模块导入和对象创建开销
+- **按需加载**：未使用门锁功能时不加载相关模块，节省内存
+- **模块解耦**：门锁模块初始化失败不影响其他 HTTP API 功能
+- **可扩展性**：为后续添加更多可选 API 模块提供了延迟加载模式参考
+
+### 涉及的处理器
+
+- `ImageUploadHandler`: 处理人脸图片上传
+- `DoorlockConfigHandler`: 处理设备配置的读取和更新
+- `DoorlockGuardHandler`: 处理看护模式的启动和停止
+- `DoorlockWelcomeHandler`: 处理欢迎词配置和模板
+- `DoorlockHistoryHandler`: 处理历史记录查询（访客意图、快递警报）
+
+### 后续集成
+
+此方法需要在路由注册时调用，确保在处理门锁相关 API 请求前完成初始化。建议在 `start()` 方法或路由处理函数中调用 `self._init_doorlock_handlers()`。
+
+---
+
+## 2026-02-12
+
+### 新增文件
+
+- `main/xiaozhi-server/test_openai_encoding.py`
+
+### 新增位置
+
+- `main/xiaozhi-server/` 目录下新增 OpenAI SDK 编码问题测试脚本
+
+### 变更内容
+
+1. **测试脚本结构**：
+   - 设置 UTF-8 编码环境变量（`PYTHONIOENCODING='utf-8'`）
+   - 包含 4 个测试部分：JSON 序列化、httpx 编码、OpenAI SDK、httpx 默认编码检查
+
+2. **测试用例设计**：
+   - 使用包含中文的工具函数描述（`get_weather` 函数）
+   - 测试消息包含中文内容（"你是一个智能助手"、"给我拍个照片"）
+   - 模拟真实的 OpenAI API 调用参数结构
+
+3. **测试内容**：
+   - **测试 1**：JSON 序列化（`ensure_ascii=False`）
+   - **测试 2**：httpx 请求创建和编码处理
+   - **测试 3**：OpenAI SDK 客户端创建和参数构建
+   - **测试 4**：检查 httpx 内部编码模块
+
+4. **诊断功能**：
+   - 打印 httpx 和 openai 版本信息
+   - 捕获并打印详细的错误堆栈
+   - 输出请求体长度等调试信息
+
+### 功能说明
+
+创建 OpenAI SDK 编码问题诊断脚本，用于排查在调用 OpenAI 兼容 API 时出现的 `UnicodeEncodeError: 'ascii' codec can't encode characters` 错误。该脚本通过模拟包含中文工具函数描述的 API 调用，测试 JSON 序列化、httpx 请求构建、OpenAI SDK 参数处理等各个环节的编码兼容性，帮助定位编码问题的具体来源。此脚本配合 `test_encoding_issue.py` 和 `app.py` 中的编码修复（Windows 平台 UTF-8 设置），用于验证编码问题是否已解决。
+
+---
+
+## 2026-02-12
+
+### 修复 OpenAI SDK 中文编码问题
+
+#### 修改文件
+
+- `main/xiaozhi-server/core/providers/llm/openai/openai.py`
+
+#### 修改位置
+
+- `LLMProvider` 类的 `__init__` 方法（第 49-60 行）
+
+#### 变更内容
+
+1. **创建自定义 httpx 客户端**：
+   - 显式设置 `Content-Type: application/json; charset=utf-8` 请求头
+   - 配置超时参数 `httpx.Timeout(self.timeout)`
+
+2. **传递自定义客户端给 OpenAI SDK**：
+   - 将自定义 httpx 客户端通过 `http_client` 参数传递给 `openai.OpenAI()`
+   - 确保所有 HTTP 请求都使用 UTF-8 编码
+
+#### 功能说明
+
+修复 OpenAI SDK 在处理包含中文字符的工具函数描述（如门锁 AI 功能的工具函数）时可能出现的编码问题。通过显式设置 HTTP 请求头的字符集为 UTF-8，确保中文内容在序列化和传输过程中不会出现编码错误，避免 `UnicodeEncodeError` 或乱码问题。
+
+此修复对以下场景特别重要：
+
+- 门锁 AI 功能的工具函数调用（包含中文描述）
+- LLM 对话中包含中文提示词
+- 系统消息和用户消息包含中文内容
+
+#### 相关问题
+
+- 解决了在调用 `response_with_functions` 时，工具函数描述包含中文导致的编码异常
+- 确保与 VLLM 等其他服务的中文交互正常工作
+
+---
+
+## 2026-02-12 (更新)
+
+### 修改文件
+
+- `main/xiaozhi-server/core/providers/llm/openai/openai.py`
+
+### 修改位置
+
+- `LLMProvider` 类的 `response_with_functions` 方法的异常处理部分（第 159-164 行）
+
+### 变更内容
+
+- 优化错误日志输出方式
+- 将错误堆栈信息从 `debug` 级别提升到 `error` 级别
+- 将堆栈信息与错误消息合并输出，提高日志可读性
+- 原：分别调用 `logger.error()` 和 `logger.debug()` 输出错误和堆栈
+- 改：在单次 `logger.error()` 调用中输出完整的错误信息和堆栈
+
+### 功能说明
+
+增强 OpenAI 函数调用流式响应的错误诊断能力。当 `response_with_functions` 方法发生异常时（如编码错误、网络错误、API 错误等），现在会在 error 级别日志中直接输出完整的错误堆栈信息，无需调整日志级别即可查看详细的错误追踪信息。这对于快速定位和诊断以下问题特别有帮助：
+
+- 中文编码问题（`UnicodeEncodeError`）
+- OpenAI API 调用失败
+- 网络连接超时
+- 参数序列化错误
+
+此修改配合之前的编码修复（`app.py` 中的 UTF-8 设置、自定义 httpx 客户端），形成完整的错误诊断和修复方案。
+
+## 2026-02-12
+
+### 新增 httpx 编码修复补丁模块
+
+#### 新增文件
+
+- `main/xiaozhi-server/fix_httpx_encoding.py`
+
+#### 新增位置
+
+- 项目根目录下新增独立的编码修复补丁模块
+
+#### 变更内容
+
+1. **新增 `patch_httpx_encoding()` 函数**：
+   - 通过 monkey patching 修复 httpx 的 `encode_json` 函数
+   - 强制使用 `ensure_ascii=False` 和 UTF-8 编码
+   - 设置 Content-Type 为 `application/json; charset=utf-8`
+   - 提供回退机制，修复失败时使用原始函数
+
+2. **新增 `patch_json_dumps()` 函数**：
+   - 包装标准库 `json.dumps` 函数
+   - 默认设置 `ensure_ascii=False`
+   - 确保所有 JSON 序列化默认使用 UTF-8
+
+3. **新增测试代码**：
+   - 测试 httpx.encode_json 编码功能
+   - 测试 json.dumps 编码功能
+   - 验证中文字符处理是否正常
+
+#### 功能说明
+
+解决 OpenAI SDK 在调用 `response_with_functions` 时出现的 `'ascii' codec can't encode characters` 错误。通过在应用启动时应用这些补丁，确保所有包含中文字符的工具函数描述都能正确序列化为 UTF-8 编码的 JSON，避免 ASCII 编码错误导致的请求失败。
+
+#### 使用方式
+
+在 `app.py` 启动时调用：
+
+```python
+from fix_httpx_encoding import patch_httpx_encoding, patch_json_dumps
+
+# 应用编码修复补丁
+patch_httpx_encoding()
+patch_json_dumps()
+```
+
+#### 相关问题
+
+- 修复 `core/providers/llm/openai/openai.py` 中工具函数调用时的编码错误
+- 解决门锁 AI 功能中 VLLM 工具函数描述包含中文导致的序列化失败
+- 确保所有 HTTP 请求体中的中文字符都能正确编码
+
+---
+
+## 2026-02-12 (更新 2)
+
+### 移除 httpx 编码修复补丁
+
+#### 修改文件
+
+- `main/xiaozhi-server/app.py`
+
+#### 修改位置
+
+- 文件头部导入区域（原第 28-35 行）
+
+#### 变更内容
+
+- 移除 `fix_httpx_encoding` 模块的导入语句
+- 删除 `patch_httpx_encoding()` 和 `patch_json_dumps()` 函数调用
+- 移除相关的 try-except 异常处理块
+
+#### 功能说明
+
+移除临时的 httpx 编码修复补丁方案。此变更表明编码问题已通过更根本的方式解决，不再需要在运行时动态修补 httpx 库的行为。可能的解决方案包括：
+
+1. 升级 httpx 或 openai 库到修复了编码问题的版本
+2. 在系统层面正确配置 UTF-8 环境（通过 `app.py` 中已有的 `PYTHONIOENCODING` 设置）
+3. 修改 OpenAI Provider 的实现方式，避免触发编码问题
+
+此修改简化了应用启动流程，移除了对 `fix_httpx_encoding.py` 模块的依赖，使代码更加简洁和可维护。
+
+#### 相关文件
+
+- 保留 `fix_httpx_encoding.py` 文件作为历史参考
+- 保留 `app.py` 中的系统级 UTF-8 编码设置（第 14-24 行）
+
+---
+
+## 2026-02-12 (更新 3)
+
+### 新增 httpx 编码问题修复脚本
+
+#### 新增文件
+
+- `main/xiaozhi-server/fix_httpx_encoding.py`
+
+#### 变更内容
+
+- 新增独立的 Python 脚本，用于自动修复 httpx 编码问题
+- 实现 `fix_httpx_encoding()` 函数：
+  - 显示当前 httpx 版本信息
+  - 自动卸载 httpx 0.28.1 版本
+  - 安装 httpx 0.27.2 稳定版本
+  - 验证安装结果并显示新版本信息
+- 包含完整的错误处理和用户友好的输出信息
+- 支持命令行直接执行：`python fix_httpx_encoding.py`
+
+#### 功能说明
+
+提供一键式解决方案修复 httpx 0.28.x 版本的中文编码 bug。该版本在处理包含中文字符的 HTTP 请求时会抛出 `'ascii' codec can't encode characters in position X-Y: ordinal not in range(128)` 错误，影响门锁 AI 功能中的 VLLM 工具函数调用。
+
+通过降级到 httpx 0.27.2 版本，可彻底解决编码问题，确保：
+
+- OpenAI Provider 的工具函数调用正常工作
+- 门锁 AI 功能的中文提示词和工具描述正确序列化
+- 所有 HTTP 请求体中的中文字符都能正确编码
+
+#### 使用方法
+
+```bash
+cd main/xiaozhi-server
+python fix_httpx_encoding.py
+```
+
+执行后需重新启动服务以使更改生效。
+
+#### 相关问题
+
+- 解决 `core/providers/llm/openai/openai.py` 中工具函数调用时的编码错误
+- 修复门锁 AI 功能中 VLLM 工具函数描述包含中文导致的序列化失败
+- 确保智能门锁访客意图识别和看护模式的 AI 功能正常运行
+
+---

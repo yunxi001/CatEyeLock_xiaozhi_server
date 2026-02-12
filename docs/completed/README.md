@@ -43,6 +43,11 @@ seq_id 机制修复相关文档：
 - `MIGRATION_SUMMARY.md` - v5.0 到 v5.2 迁移总结
 - `MIGRATION_EXECUTION_REPORT.md` - 迁移执行报告
 - `CHANGELOG_password_query.md` - 密码查询变更日志
+- `database_content_report.md` - 数据库内容汇总报告（快照）
+- `database_tables_complete_analysis.md` - 数据库表完整分析报告
+- `database_empty_tables_code_analysis.md` - 数据库空表填充逻辑代码分析
+- `doorlock-user-management-implementation.md` - 门锁用户管理功能实现报告
+- `doorlock-user-management-migration-report.md` - 门锁用户管理数据库迁移报告
 
 ### 📁 bug-fixes/
 
@@ -61,6 +66,23 @@ Bug 修复和功能改进文档：
 - `TASK_7_SUMMARY.md` - LogReportHandler v5.2 协议升级
 - `TASK_9_SUMMARY.md` - 命令下发重试机制实现
 
+### 📁 code-analysis/
+
+代码分析与修复文档：
+
+- `code-vs-doc-inconsistencies.md` - ESP32 代码与文档不一致性分析报告
+- `code-vs-doc-inconsistencies-answers.md` - 不一致性问题解答
+- `code-fix-recommendations.md` - 代码修复建议
+- `code-inconsistencies-fix-summary.md` - 代码修复总结
+- `disable-timeout-mechanism.md` - 禁用超时机制说明
+- `test-no-timeout-connection.md` - 永久连接测试指南
+- `app-data-processing-code-inconsistencies.md` - App 数据处理代码不一致性分析
+- `app-protocol-documentation-completion-report.md` - App 协议文档完善报告
+- `统一错误码修改计划.md` - 统一错误码修改计划
+- `统一错误码修改完成报告.md` - 统一错误码修改完成报告
+- `统一错误码修改总结.md` - 统一错误码修改总结
+- `app-message-routing-verification.md` - App 消息路由验证报告
+
 ### 📄 其他已完成文档
 
 - `App协议v2.2代码修改计划.md`
@@ -70,6 +92,8 @@ Bug 修复和功能改进文档：
 
 - **2026-01-17**: 初次归档，整理协议升级相关文档
 - **2026-01-19**: 第二次归档，整理数据库优化、Bug 修复、任务总结文档
+- **2026-01-30**: 第三次归档，整理代码分析与修复文档、数据库分析文档
+- **2026-02-01**: 第四次归档，整理门锁用户管理功能实现和验证文档
 
 ## 说明
 

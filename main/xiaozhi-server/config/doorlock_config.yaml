@@ -1,0 +1,42 @@
+# 智能门锁AI功能独立配置文件
+# 此配置文件独立于系统主配置，不会被 manager-api 覆盖
+# 注意：VLLM 配置复用系统配置（config.yaml 的 selected_module.VLLM）
+
+# MySQL数据库配置
+mysql:
+  host: 127.0.0.1
+  port: 3306
+  user: root
+  password: "123456"
+  database: smart_doorlock
+  pool_size: 5
+
+# 快递看护模式配置
+package_guard:
+  # 拍照间隔（秒）
+  photo_interval: 5
+  # 基准图片存储目录
+  baseline_dir: "data/face_recognition/package_baseline/"
+  # 警报照片存储目录
+  alert_photo_dir: "data/face_recognition/doorlock_photos/"
+
+# 意图识别配置
+intent_recognition:
+  # 对话超时时间（秒）
+  dialogue_timeout: 30
+  # 最大对话轮次
+  max_dialogue_rounds: 10
+
+# 人脸识别配置
+face_recognition:
+  # 最大重试次数
+  max_retries: 3
+  # 重试间隔（秒）
+  retry_interval: 1
+
+# 性能配置
+performance:
+  # Token使用量警告阈值（0.0-1.0）
+  max_token_usage_ratio: 0.8
+  # 会话清理延迟（秒）
+  session_cleanup_delay: 0

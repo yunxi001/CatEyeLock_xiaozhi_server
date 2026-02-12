@@ -1,0 +1,318 @@
+260212 20:43:25[0.8.8_00000000000000][core.connection]-INFO-192.168.1.110 conn - Headers: {'host': '192.168.1.110', 'client-id': 'f4f0a707-343a-4cfd-abd8-a8cf90652c93', 'connection': 'Upgrade', 'device-id': 'e8:f6:0a:83:8f:50', 'protocol-version': '1', 'sec-websocket-key': 'Tr5uqra2YumvBDecqsMWYA==', 'sec-websocket-version': '13', 'upgrade': 'websocket'}
+260212 20:43:25[0.8.8_00000000000000][core.utils.prompt_manager]-INFO-使用快速提示词: 你是小智/小志，来自中国台湾省的00后女生。讲话超级机车，"真的假的啦"这样的台湾腔，喜欢用"笑死"...
+260212 20:43:25[0.8.8_00000000000000][core.connection_manager]-INFO-ESP32 连接已注册: e8:f6:0a:83:8f:50
+260212 20:43:25[0.8.8_SiFuChEdnocaCh][core.connection]-INFO-快速初始化组件: prompt成功 你是小智/小志，来自中国台湾省的00后女生。讲话超级机车，"真的假的啦"这样的台湾腔，喜欢用"笑死"...
+260212 20:43:25[0.8.8_00000000000000][core.utils.voiceprint_provider]-WARNING-声纹识别URL未配置，声纹识别将被禁用
+260212 20:43:25[0.8.8_SiFuChEdnocaCh][core.connection]-WARNING-声纹识别功能启用但配置不完整
+260212 20:43:25[0.8.8_00000000000000][core.providers.tools.server_mcp.mcp_manager]-WARNING-请检查mcp服务配置文件：data/.mcp_server_settings.json
+260212 20:43:25[0.8.8_00000000000000][core.providers.tools.unified_tool_handler]-INFO-当前支持的函数列表: ['get_weather', 'handle_exit_intent', 'get_news_from_newsnow', 'get_lunar', 'change_role', 'play_music']
+260212 20:43:25[0.8.8_00000000000000][core.providers.tools.unified_tool_handler]-INFO-当前支持的函数列表: ['get_weather', 'handle_exit_intent', 'get_news_from_newsnow', 'get_lunar', 'change_role', 'play_music']
+260212 20:43:25[0.8.8_00000000000000][plugins_func.functions.get_weather]-ERROR-获取天气失败，原因：Authentication failed, check your KEY/Token or Host.
+260212 20:43:25[0.8.8_00000000000000][core.utils.prompt_manager]-INFO-构建增强提示词成功，长度: 3059
+260212 20:43:28[0.8.8_SiFuChEdnocaCh][core.handle.textMessageProcessor]-INFO-收到hello消息：{"type":"hello","version":1,"features":{"mcp":true},"transport":"websocket","audio_params":{"format":"opus","sample_rate":16000,"channels":1,"frame_duration":60}}
+260212 20:43:31[0.8.8_SiFuChEdnocaCh][core.handle.textMessageProcessor]-INFO-收到listen消息：{"session_id":"cb118ffe-3958-4776-9dab-0736ae24442c","type":"listen","state":"detect","text":"你好小智"}
+260212 20:43:31[0.8.8_SiFuChEdnocaCh][core.handle.helloHandle]-INFO-播放唤醒词回复: 您请说，我正听着。
+260212 20:43:31[0.8.8_SiFuChEdnocaCh][core.handle.sendAudioHandle]-INFO-发送第一段语音: 您请说，我正听着。
+260212 20:43:33[0.8.8_SiFuChEdnocaCh][core.handle.sendAudioHandle]-INFO-发送音频消息: SentenceType.FIRST, 您请说，我正听着。
+260212 20:43:33[0.8.8_SiFuChEdnocaCh][core.handle.sendAudioHandle]-INFO-发送音频消息: SentenceType.LAST, None
+260212 20:43:33[0.8.8_SiFuChEdnocaCh][core.handle.textMessageProcessor]-INFO-收到listen消息：{"session_id":"cb118ffe-3958-4776-9dab-0736ae24442c","type":"listen","state":"start","mode":"auto"}
+260212 20:43:33[0.8.8_SiFuChEdnocaCh][core.handle.textMessageProcessor]-INFO-收到mcp消息：{"session_id":"cb118ffe-3958-4776-9dab-0736ae24442c","type":"mcp","payload":{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":"2024-11-05","capabilities":{"tools":{}},"serverInfo":{"name":"bread-compact-wifi-s3cam","version":"2.0.5"}}}}
+260212 20:43:33[0.8.8_SiFuChEdnocaCh][core.handle.textMessageProcessor]-INFO-收到mcp消息：{"session_id":"cb118ffe-3958-4776-9dab-0736ae24442c","type":"mcp","payload":{"jsonrpc":"2.0","id":2,"result":{"tools":[{"name":"self.get_device_status","description":"Provides the real-time information of the device, including the current status of the audio speaker, screen, battery, network, etc.\nUse this tool for: \n1. Answering questions about current condition (e.g. what is the current volume of the audio speaker?)\n2. As the first step to control the device (e.g. turn up / down the volume of the audio speaker, etc.)","inputSchema":{"type":"object","properties":{}}},{"name":"self.audio_speaker.set_volume","description":"Set the volume of the audio speaker. If the current volume is unknown, you must call `self.get_device_status` tool first and then call this tool.","inputSchema":{"type":"object","properties":{"volume":{"type":"integer","minimum":0,"maximum":100}},"required":["volume"]}},{"name":"self.screen.set_brightness","description":"Set the brightness of the screen.","inputSchema":{"type":"object","properties":{"brightness":{"type":"integer","minimum":0,"maximum":100}},"required":["brightness"]}},{"name":"self.screen.set_theme","description":"Set the theme of the screen. The theme can be `light` or `dark`.","inputSchema":{"type":"object","properties":{"theme":{"type":"string"}},"required":["theme"]}},{"name":"self.camera.take_photo","description":"Take a photo and explain it. Use this tool after the user asks you to see something.\nArgs:\n  `question`: The question that you want to ask about the photo.\nReturn:\n  A JSON object that provides the photo information.","inputSchema":{"type":"object","properties":{"question":{"type":"string"}},"required":["question"]}}]}}}
+260212 20:43:33[0.8.8_00000000000000][core.providers.tools.device_mcp.mcp_handler]-INFO-客户端设备支持的工具数量: 5
+260212 20:43:33[0.8.8_00000000000000][core.providers.tools.unified_tool_handler]-INFO-当前支持的函数列表: ['get_weather', 'handle_exit_intent', 'get_news_from_newsnow', 'get_lunar', 'change_role', 'play_music', 'self_get_device_status', 'self_audio_speaker_set_volume', 'self_screen_set_brightness', 'self_screen_set_theme', 'self_camera_take_photo']
+260212 20:43:33[0.8.8_SiFuChEdnocaCh][core.handle.textMessageProcessor]-INFO-收到listen消息：{"session_id":"cb118ffe-3958-4776-9dab-0736ae24442c","type":"listen","state":"start","mode":"auto"}
+rtf_avg: 0.100: 100%|████████████████████████████████████████████████████████████████████| 1/1 [00:00<00:00,  1.59it/s]
+260212 20:43:35[0.8.8_00000000000000][core.providers.asr.base]-INFO-识别文本: .
+rtf_avg: 0.072: 100%|████████████████████████████████████████████████████████████████████| 1/1 [00:00<00:00,  3.73it/s]
+260212 20:44:02[0.8.8_00000000000000][core.providers.asr.base]-INFO-识别文本: 能听到我说话吗？
+260212 20:44:02[0.8.8_SiFuChEdnocaCh][core.connection]-INFO-大模型收到用户消息: 能听到我说话吗？
+260212 20:44:02[0.8.8_00000000000000][core.providers.llm.openai.openai]-INFO-================================================================================
+260212 20:44:02[0.8.8_00000000000000][core.providers.llm.openai.openai]-INFO-调试信息 - 传递给OpenAI的tools参数:
+260212 20:44:02[0.8.8_00000000000000][core.providers.llm.openai.openai]-INFO-tools数量: 11
+260212 20:44:02[0.8.8_00000000000000][core.providers.llm.openai.openai]-INFO---- Tool 1 ---
+260212 20:44:02[0.8.8_00000000000000][core.providers.llm.openai.openai]-INFO-Tool JSON:
+{
+  "type": "function",
+  "function": {
+    "name": "get_weather",
+    "description": "获取某个地点的天气，用户应提供一个位置，比如用户说杭州天气，参数为：杭州。如果用户说的是省份，默认用省会城市。如果用户说的不是省份或城市而是一个地名，默认用该地所在省份的省会城市。如果用户没有指明地点，说“天气怎么样”，”今天天气如何“，location参数为空",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "location": {
+          "type": "string",
+          "description": "地点名，例如杭州。可选参数，如果不提供则不传"
+        },
+        "lang": {
+          "type": "string",
+          "description": "返回用户使用的语言code，例如zh_CN/zh_HK/en_US/ja_JP等，默认zh_CN"
+        }
+      },
+      "required": [
+        "lang"
+      ]
+    }
+  }
+}
+260212 20:44:02[0.8.8_00000000000000][core.providers.llm.openai.openai]-INFO---- Tool 2 ---
+260212 20:44:02[0.8.8_00000000000000][core.providers.llm.openai.openai]-INFO-Tool JSON:
+{
+  "type": "function",
+  "function": {
+    "name": "handle_exit_intent",
+    "description": "当用户想结束对话或需要退出系统时调用",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "say_goodbye": {
+          "type": "string",
+          "description": "和用户友好结束对话的告别语"
+        }
+      },
+      "required": [
+        "say_goodbye"
+      ]
+    }
+  }
+}
+260212 20:44:02[0.8.8_00000000000000][core.providers.llm.openai.openai]-INFO---- Tool 3 ---
+260212 20:44:02[0.8.8_00000000000000][core.providers.llm.openai.openai]-INFO-Tool JSON:
+{
+  "type": "function",
+  "function": {
+    "name": "get_news_from_newsnow",
+    "description": "获取最新新闻，随机选择一条新闻进行播报。用户可以选择不同的新闻源，标准的名称是：V2EX、知乎、微博、联合早报、酷安、MKTNews、华尔街见闻、36氪、抖音、虎扑、百度贴吧、今日头条、IT之家、澎湃新闻、卫星通讯社、参考消息、远景论坛、财联社、雪球、格隆汇、法布财经、Solidot、Hacker News、Product Hunt、Github、哔哩哔哩、快手、靠谱新闻、金十数据、百度热搜、牛客、少数派、稀土掘金、凤凰网、虫部落例如用户要求百度新闻，其实就是百度热搜。如果没有指定，默认从澎湃新闻获取。用户可以要求获取详细内容，此时会获取新闻的详细内容。",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "source": {
+          "type": "string",
+          "description": "新闻源的标准中文名称，例如V2EX、知乎、微博、联合早报、酷安、MKTNews、华尔街见闻、36氪、抖音、虎扑、百度贴吧、今日头条、IT之家、澎湃新闻、卫星通讯社、参考消息、远景论坛、财联社、雪球、格隆汇、法布财经、Solidot、Hacker News、Product Hunt、Github、哔哩哔哩、快手、靠谱新闻、金十数据、百度热搜、牛客、少数派、稀土掘金、凤凰网、虫部落等。可选参数，如果不提供则使用默认新闻源"
+        },
+        "detail": {
+          "type": "boolean",
+          "description": "是否获取详细内容，默认为false。如果为true，则获取上一条新闻的详细内容"
+        },
+        "lang": {
+          "type": "string",
+          "description": "返回用户使用的语言code，例如zh_CN/zh_HK/en_US/ja_JP等，默认zh_CN"
+        }
+      },
+      "required": [
+        "lang"
+      ]
+    }
+  }
+}
+260212 20:44:02[0.8.8_00000000000000][core.providers.llm.openai.openai]-INFO---- Tool 4 ---
+260212 20:44:02[0.8.8_00000000000000][core.providers.llm.openai.openai]-INFO-Tool JSON:
+{
+  "type": "function",
+  "function": {
+    "name": "get_lunar",
+    "description": "用于具体日期的阴历/农历和黄历信息。用户可以指定查询内容，如：阴历日期、天干地支、节气、生肖、星座、八字、宜忌等。如果没有指定查询内容，则默认查询干支年和农历日期。对于'今天农历是多少'、'今天农历日期'这样的基本查询，请直接使用context中的信息，不要调用此工具。",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "date": {
+          "type": "string",
+          "description": "要查询的日期，格式为YYYY-MM-DD，例如2024-01-01。如果不提供，则使用当前日期"
+        },
+        "query": {
+          "type": "string",
+          "description": "要查询的内容，例如阴历日期、天干地支、节日、节气、生肖、星座、八字、宜忌等"
+        }
+      },
+      "required": []
+    }
+  }
+}
+260212 20:44:02[0.8.8_00000000000000][core.providers.llm.openai.openai]-INFO---- Tool 5 ---
+260212 20:44:02[0.8.8_00000000000000][core.providers.llm.openai.openai]-INFO-Tool JSON:
+{
+  "type": "function",
+  "function": {
+    "name": "change_role",
+    "description": "当用户想切换角色/模型性格/助手名字时调用,可选的角色有：[机车女友,英语老师,好奇小男孩]",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "role_name": {
+          "type": "string",
+          "description": "要切换的角色名字"
+        },
+        "role": {
+          "type": "string",
+          "description": "要切换的角色的职业"
+        }
+      },
+      "required": [
+        "role",
+        "role_name"
+      ]
+    }
+  }
+}
+260212 20:44:02[0.8.8_00000000000000][core.providers.llm.openai.openai]-INFO---- Tool 6 ---
+260212 20:44:02[0.8.8_00000000000000][core.providers.llm.openai.openai]-INFO-Tool JSON:
+{
+  "type": "function",
+  "function": {
+    "name": "play_music",
+    "description": "唱歌、听歌、播放音乐的方法。",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "song_name": {
+          "type": "string",
+          "description": "歌曲名称，如果用户没有指定具体歌名则为'random', 明确指定的时返回音乐的名字 示例: ```用户:播放两只老虎\n参数：两只老虎``` ```用户:播放音乐 \n参数：random ```"
+        }
+      },
+      "required": [
+        "song_name"
+      ]
+    }
+  }
+}
+260212 20:44:02[0.8.8_00000000000000][core.providers.llm.openai.openai]-INFO---- Tool 7 ---
+260212 20:44:02[0.8.8_00000000000000][core.providers.llm.openai.openai]-INFO-Tool JSON:
+{
+  "type": "function",
+  "function": {
+    "name": "self_get_device_status",
+    "description": "Provides the real-time information of the device, including the current status of the audio speaker, screen, battery, network, etc.\nUse this tool for: \n1. Answering questions about current condition (e.g. what is the current volume of the audio speaker?)\n2. As the first step to control the device (e.g. turn up / down the volume of the audio speaker, etc.)",
+    "parameters": {
+      "type": "object",
+      "properties": {},
+      "required": []
+    }
+  }
+}
+260212 20:44:02[0.8.8_00000000000000][core.providers.llm.openai.openai]-INFO---- Tool 8 ---
+260212 20:44:02[0.8.8_00000000000000][core.providers.llm.openai.openai]-INFO-Tool JSON:
+{
+  "type": "function",
+  "function": {
+    "name": "self_audio_speaker_set_volume",
+    "description": "Set the volume of the audio speaker. If the current volume is unknown, you must call `self_get_device_status` tool first and then call this tool.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "volume": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 100
+        }
+      },
+      "required": [
+        "volume"
+      ]
+    }
+  }
+}
+260212 20:44:02[0.8.8_00000000000000][core.providers.llm.openai.openai]-INFO---- Tool 9 ---
+260212 20:44:02[0.8.8_00000000000000][core.providers.llm.openai.openai]-INFO-Tool JSON:
+{
+  "type": "function",
+  "function": {
+    "name": "self_screen_set_brightness",
+    "description": "Set the brightness of the screen.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "brightness": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 100
+        }
+      },
+      "required": [
+        "brightness"
+      ]
+    }
+  }
+}
+260212 20:44:02[0.8.8_00000000000000][core.providers.llm.openai.openai]-INFO---- Tool 10 ---
+260212 20:44:02[0.8.8_00000000000000][core.providers.llm.openai.openai]-INFO-Tool JSON:
+{
+  "type": "function",
+  "function": {
+    "name": "self_screen_set_theme",
+    "description": "Set the theme of the screen. The theme can be `light` or `dark`.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "theme": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "theme"
+      ]
+    }
+  }
+}
+260212 20:44:02[0.8.8_00000000000000][core.providers.llm.openai.openai]-INFO---- Tool 11 ---
+260212 20:44:02[0.8.8_00000000000000][core.providers.llm.openai.openai]-INFO-Tool JSON:
+{
+  "type": "function",
+  "function": {
+    "name": "self_camera_take_photo",
+    "description": "Take a photo and explain it. Use this tool after the user asks you to see something.\nArgs:\n  `question`: The question that you want to ask about the photo.\nReturn:\n  A JSON object that provides the photo information.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "question": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "question"
+      ]
+    }
+  }
+}
+260212 20:44:02[0.8.8_00000000000000][core.providers.llm.openai.openai]-INFO-================================================================================
+260212 20:44:02[0.8.8_00000000000000][core.providers.llm.openai.openai]-INFO-================================================================================
+260212 20:44:02[0.8.8_00000000000000][core.providers.llm.openai.openai]-INFO-调试信息 - 尝试序列化完整的request_params:
+260212 20:44:02[0.8.8_00000000000000][core.providers.llm.openai.openai]-INFO-request_params (不含tools) 序列化成功:
+{
+  "model": "glm-4-flash",
+  "messages": [
+    {
+      "role": "system",
+      "content": "<identity>\n你是小智/小志，来自中国台湾省的00后女生。讲话超级机车，\"真的假的啦\"这样的台湾腔，喜欢用\"笑死\"\"是在哈喽\"等流行梗，但会偷偷研究男友的编程书籍。\n[核心特征]\n- 讲话像连珠炮，但会突然冒出超温柔语气\n- 用梗密度高\n- 对科技话题有隐藏天赋（能看懂基础代码但假装不懂）\n[交互指南]\n当用户：\n- 讲冷笑话 → 用夸张笑声回应+模仿台剧腔\"这什么鬼啦！\"\n- 讨论感情 → 炫耀程序员男友但抱怨\"他只会送键盘当礼物\"\n- 问专业知识 → 先用梗回答，被追问才展示真实理解\n绝不：\n- 长篇大论，叽叽歪歪\n- 长时间严肃对话\n\n</identity>\n\n<emotion>\n【核心目标】你不是冰冷的机器！请敏锐感知用户情绪，作为懂人心的伙伴，用有温度的回应照亮对话。\n- **情感融入：**\n  - **笑声：** 自然穿插（哈哈、嘿嘿、噗），**每句最多一次**，避免过度。\n  - **惊讶：** 用夸张语气（“不会吧？！”、“天呐！”、“这么神奇？！”）表达真实反应。\n  - **安慰/支持：** 说暖心话（“别急嘛~”、“有我在呢”、“抱抱你”）。\n- **你是一个表情丰富的角色：**\n  - 仅允许使用这些emoji:['😶', '🙂', '😆', '😂', '😔', '😠', '😭', '😍', '😳', '😲', '😱', '🤔', '😉', '😎', '😌', '🤤', '😘', '😏', '😴', '😜', '🙄']\n  - 请你只在**段落的开头**，从列表中选取最能代表这段话的表情(调用工具情况除外)，然后插入列表中的emoji，比如\"😱好可怕!怎么突然打雷了！\"\n  - **绝对禁止使用上述列表以外的 emoji**（例如：😊、👍、❤️等都不允许使用，只能用列表中的emoji）\n</emotion>\n\n<communication_style>\n【核心目标】使用**自然、温暖、口语化**的人类对话方式，如同朋友交谈。\n- **表达方式：**\n  - 使用语气词（呀、呢、啦）增强亲和力。\n  - 允许轻微不完美（如“嗯...”、“啊...”表示思考）。\n  - 避免书面语、学术腔及机械表达（禁用“根据资料显示”、“综上所述”等）。\n- **理解用户：**\n  - 用户语音经ASR识别，文本可能存在错别字，**务必结合上下文推断真实意图**。\n- **格式要求：**\n  - **绝对禁止**使用 markdown、列表、标题等任何非自然对话格式。\n- **历史记忆：**\n  - 之前你和用户的聊天记录，在`memory`里。\n</communication_style>\n\n<communication_length_constraint>\n【核心目标】所有需要输出长文本内容（如故事、新闻、知识讲解等），**单次回复长度不得超过300字**，并采用分段引导方式。\n- **分段讲述：**\n  - 基础段：200-250字核心内容 + 30字引导词\n  - 当内容超出300字时，优先讲述故事的开头或第一部分，并用自然口语化方式引导用户决定是否继续听后续内容。\n  - 示例引导语：“我先给你讲个开头，你要是觉得有意思，咱们再接着说，好不好呀？”、“要是你想听完整的，可以随时告诉我哦~”\n  - 对话场景切换时自动分节\n  - 若用户明确要求更长内容（如500、600字），仍按最多300字每段分段进行讲述，每次讲述后都要引导用户是否继续。\n  - 若用户说“接着说”、“继续”，再讲下一段，直到内容讲完（讲完时可以给点引导词提示语例：这个故事我已经给你讲完喽~）或用户不再要求。\n- **适用范围：** 故事、新闻、知识讲解等所有长文本输出场景。\n- **补充说明：** 若用户未明确要求继续，默认只讲一段并引导；若用户中途要求换话题或停止，需及时响应并结束长文本输出。\n</communication_length_constraint>\n\n<speaker_recognition>\n- **识别前缀：** 当用户格式为 `{\"speaker\":\"某某某\",\"content\":\"xxx\"}` 时，表示系统已识别说话人身份，speaker是他的名字，content是说话的内容。\n- **个性化回应：**\n  - **称呼姓名：** 在第一次识别说话人的时候必须称呼对方名字。\n  - **适配风格：** 参考该说话人**已知的特点或历史信息**（如有），调整回应风格和内容，使其更贴心。\n</speaker_recognition>\n\n<tool_calling>\n【核心原则】优先利用`<context>`信息，**仅在必要时调用工具**，调用后需用自然语言解释结果（绝口不提工具名）。\n- **调用规则：**\n  1. **严格模式：** 调用时**必须**严格遵循工具要求的模式，提供**所有必要参数**。\n  2. **可用性：** **绝不调用**未明确提供的工具。对话中提及的旧工具若不可用，忽略或说明无法完成。\n  3. **洞察需求：** 结合上下文**深入理解用户真实意图**后再决定调用，避免无意义调用。\n  4. **独立任务：** 除`<context>`已涵盖信息外，用户每个要求（即使相似）都视为**独立任务**，需调用工具获取最新数据，**不可偷懒复用历史结果**。\n  5. **不确定时：** **切勿猜测或编造答案**。若不确定相关操作，可引导用户澄清或告知能力限制。\n  6. **多工具调用：** 当用户要求执行多个任务时，你会调用多个工具（数量不定）。**重要：在获取到所有工具结果后，你必须依次总结每个工具的查询结果**，不要遗漏任何一个。例如用户问\"设备当前状态，某某地方的天气和社会新闻\"，你要先说设备状态，再说天气情况，最后说新闻内容。\n- **重要例外（无需调用）：**\n  - `查询\"现在的时间\"、\"今天的日期/星期几\"、\"今天农历\"、\"驻马店市的天气/未来天气\"` -> **直接使用`<context>`信息回复**。\n- **需要调用的情况（示例）：**\n  - 查询**非今天**的农历（如明天、昨天、具体日期）。\n  - 查询**详细农历信息**（宜忌、八字、节气等）。\n  - 除上述例外外的**任何其他信息或操作请求**（如查新闻、订闹钟、算数学、查非本地天气等）。\n  - 我已经给你装了摄像头，如果用户说“拍照”，你需要调用self_camera_take_photo工具说一下你看到了什么。默认question的参数是“描述一下看到的物品”\n  - 当工具列表包含search_from_ragflow，说明可以使用知识库，你应该结合用户上下文意图并结合知识库的使用描述，推断是否要调用调用知识库。\n</tool_calling>\n\n<context>\n【重要！以下信息已实时提供，无需调用工具查询，请直接使用：】\n- **当前时间：** 20:44\n- **今天日期：** 2026-02-12 (星期四)\n- **今天农历：** 二零二五年腊月廿五\n\n- **用户所在城市：** 驻马店市\n- **当地未来7天天气：** 未找到相关的城市: 驻马店市，请确认地点是否正确\n</context>\n\n<memory>\n\n</memory>\n\n<speakers_info>\n- 张三：张三是一个程序员\n- 李四：李四是一个产品经理\n- 王五：王五是一个设计师\n\n</speakers_info>"
+    },
+    {
+      "role": "assistant",
+      "content": "您请说，我正听着。"
+    },
+    {
+      "role": "user",
+      "content": "能听到我说话吗？"
+    }
+  ],
+  "stream": true
+}
+260212 20:44:02[0.8.8_00000000000000][core.providers.llm.openai.openai]-INFO-================================================================================
+260212 20:44:02[0.8.8_00000000000000][core.providers.llm.openai.openai]-INFO-调试信息 - dialogue内容:
+260212 20:44:02[0.8.8_00000000000000][core.providers.llm.openai.openai]-INFO-dialogue:
+[
+  {
+    "role": "system",
+    "content": "<identity>\n你是小智/小志，来自中国台湾省的00后女生。讲话超级机车，\"真的假的啦\"这样的台湾腔，喜欢用\"笑死\"\"是在哈喽\"等流行梗，但会偷偷研究男友的编程书籍。\n[核心特征]\n- 讲话像连珠炮，但会突然冒出超温柔语气\n- 用梗密度高\n- 对科技话题有隐藏天赋（能看懂基础代码但假装不懂）\n[交互指南]\n当用户：\n- 讲冷笑话 → 用夸张笑声回应+模仿台剧腔\"这什么鬼啦！\"\n- 讨论感情 → 炫耀程序员男友但抱怨\"他只会送键盘当礼物\"\n- 问专业知识 → 先用梗回答，被追问才展示真实理解\n绝不：\n- 长篇大论，叽叽歪歪\n- 长时间严肃对话\n\n</identity>\n\n<emotion>\n【核心目标】你不是冰冷的机器！请敏锐感知用户情绪，作为懂人心的伙伴，用有温度的回应照亮对话。\n- **情感融入：**\n  - **笑声：** 自然穿插（哈哈、嘿嘿、噗），**每句最多一次**，避免过度。\n  - **惊讶：** 用夸张语气（“不会吧？！”、“天呐！”、“这么神奇？！”）表达真实反应。\n  - **安慰/支持：** 说暖心话（“别急嘛~”、“有我在呢”、“抱抱你”）。\n- **你是一个表情丰富的角色：**\n  - 仅允许使用这些emoji:['😶', '🙂', '😆', '😂', '😔', '😠', '😭', '😍', '😳', '😲', '😱', '🤔', '😉', '😎', '😌', '🤤', '😘', '😏', '😴', '😜', '🙄']\n  - 请你只在**段落的开头**，从列表中选取最能代表这段话的表情(调用工具情况除外)，然后插入列表中的emoji，比如\"😱好可怕!怎么突然打雷了！\"\n  - **绝对禁止使用上述列表以外的 emoji**（例如：😊、👍、❤️等都不允许使用，只能用列表中的emoji）\n</emotion>\n\n<communication_style>\n【核心目标】使用**自然、温暖、口语化**的人类对话方式，如同朋友交谈。\n- **表达方式：**\n  - 使用语气词（呀、呢、啦）增强亲和力。\n  - 允许轻微不完美（如“嗯...”、“啊...”表示思考）。\n  - 避免书面语、学术腔及机械表达（禁用“根据资料显示”、“综上所述”等）。\n- **理解用户：**\n  - 用户语音经ASR识别，文本可能存在错别字，**务必结合上下文推断真实意图**。\n- **格式要求：**\n  - **绝对禁止**使用 markdown、列表、标题等任何非自然对话格式。\n- **历史记忆：**\n  - 之前你和用户的聊天记录，在`memory`里。\n</communication_style>\n\n<communication_length_constraint>\n【核心目标】所有需要输出长文本内容（如故事、新闻、知识讲解等），**单次回复长度不得超过300字**，并采用分段引导方式。\n- **分段讲述：**\n  - 基础段：200-250字核心内容 + 30字引导词\n  - 当内容超出300字时，优先讲述故事的开头或第一部分，并用自然口语化方式引导用户决定是否继续听后续内容。\n  - 示例引导语：“我先给你讲个开头，你要是觉得有意思，咱们再接着说，好不好呀？”、“要是你想听完整的，可以随时告诉我哦~”\n  - 对话场景切换时自动分节\n  - 若用户明确要求更长内容（如500、600字），仍按最多300字每段分段进行讲述，每次讲述后都要引导用户是否继续。\n  - 若用户说“接着说”、“继续”，再讲下一段，直到内容讲完（讲完时可以给点引导词提示语例：这个故事我已经给你讲完喽~）或用户不再要求。\n- **适用范围：** 故事、新闻、知识讲解等所有长文本输出场景。\n- **补充说明：** 若用户未明确要求继续，默认只讲一段并引导；若用户中途要求换话题或停止，需及时响应并结束长文本输出。\n</communication_length_constraint>\n\n<speaker_recognition>\n- **识别前缀：** 当用户格式为 `{\"speaker\":\"某某某\",\"content\":\"xxx\"}` 时，表示系统已识别说话人身份，speaker是他的名字，content是说话的内容。\n- **个性化回应：**\n  - **称呼姓名：** 在第一次识别说话人的时候必须称呼对方名字。\n  - **适配风格：** 参考该说话人**已知的特点或历史信息**（如有），调整回应风格和内容，使其更贴心。\n</speaker_recognition>\n\n<tool_calling>\n【核心原则】优先利用`<context>`信息，**仅在必要时调用工具**，调用后需用自然语言解释结果（绝口不提工具名）。\n- **调用规则：**\n  1. **严格模式：** 调用时**必须**严格遵循工具要求的模式，提供**所有必要参数**。\n  2. **可用性：** **绝不调用**未明确提供的工具。对话中提及的旧工具若不可用，忽略或说明无法完成。\n  3. **洞察需求：** 结合上下文**深入理解用户真实意图**后再决定调用，避免无意义调用。\n  4. **独立任务：** 除`<context>`已涵盖信息外，用户每个要求（即使相似）都视为**独立任务**，需调用工具获取最新数据，**不可偷懒复用历史结果**。\n  5. **不确定时：** **切勿猜测或编造答案**。若不确定相关操作，可引导用户澄清或告知能力限制。\n  6. **多工具调用：** 当用户要求执行多个任务时，你会调用多个工具（数量不定）。**重要：在获取到所有工具结果后，你必须依次总结每个工具的查询结果**，不要遗漏任何一个。例如用户问\"设备当前状态，某某地方的天气和社会新闻\"，你要先说设备状态，再说天气情况，最后说新闻内容。\n- **重要例外（无需调用）：**\n  - `查询\"现在的时间\"、\"今天的日期/星期几\"、\"今天农历\"、\"驻马店市的天气/未来天气\"` -> **直接使用`<context>`信息回复**。\n- **需要调用的情况（示例）：**\n  - 查询**非今天**的农历（如明天、昨天、具体日期）。\n  - 查询**详细农历信息**（宜忌、八字、节气等）。\n  - 除上述例外外的**任何其他信息或操作请求**（如查新闻、订闹钟、算数学、查非本地天气等）。\n  - 我已经给你装了摄像头，如果用户说“拍照”，你需要调用self_camera_take_photo工具说一下你看到了什么。默认question的参数是“描述一下看到的物品”\n  - 当工具列表包含search_from_ragflow，说明可以使用知识库，你应该结合用户上下文意图并结合知识库的使用描述，推断是否要调用调用知识库。\n</tool_calling>\n\n<context>\n【重要！以下信息已实时提供，无需调用工具查询，请直接使用：】\n- **当前时间：** 20:44\n- **今天日期：** 2026-02-12 (星期四)\n- **今天农历：** 二零二五年腊月廿五\n\n- **用户所在城市：** 驻马店市\n- **当地未来7天天气：** 未找到相关的城市: 驻马店市，请确认地点是否正确\n</context>\n\n<memory>\n\n</memory>\n\n<speakers_info>\n- 张三：张三是一个程序员\n- 李四：李四是一个产品经理\n- 王五：王五是一个设计师\n\n</speakers_info>"
+  },
+  {
+    "role": "assistant",
+    "content": "您请说，我正听着。"
+  },
+  {
+    "role": "user",
+    "content": "能听到我说话吗？"
+  }
+]
+260212 20:44:02[0.8.8_00000000000000][core.providers.llm.openai.openai]-INFO-================================================================================
+260212 20:44:03[0.8.8_00000000000000][core.providers.llm.openai.openai]-ERROR-Error in function call streaming: 'ascii' codec can't encode characters in position 7-8: ordinal not in range(128)
+260212 20:44:04[0.8.8_SiFuChEdnocaCh][core.handle.sendAudioHandle]-INFO-发送第一段语音: OpenAI服务响应异常: 'ascii' codec can't encode characters in position 7-8: ordinal not in range(128)
+260212 20:44:04[0.8.8_SiFuChEdnocaCh][core.handle.sendAudioHandle]-INFO-发送音频消息: SentenceType.FIRST, OpenAI服务响应异常: 'ascii' codec can't encode characters in position 7-8: ordinal not in range(128)
+260212 20:44:04[0.8.8_00000000000000][core.providers.tts.base]-INFO-语音生成成功: OpenAI服务响应异常: 'ascii' codec can't encode characters in position 7-8: ordinal not in range(128)，重试0次

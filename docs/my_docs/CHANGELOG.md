@@ -1,5 +1,47 @@
 # 变更日志
 
+## 2026-02-12
+
+### 拍照功能ASCII编码错误问题分析与解决
+
+#### 问题描述
+
+用户执行拍照功能时触发错误：`'ascii' codec can't encode characters in position 7-8: ordinal not in range(128)`
+
+#### 问题根源
+
+**配置加载路径差异导致使用不同的 ASR 模块**：
+
+1. **正确路径**：`data/.config.yaml` 中 `manager-api.url` 有值
+   - 系统从 manager-api 加载配置
+   - 使用 DoubaoStreamASR（远程API）
+   - 正常运行
+
+2. **错误路径**：`manager-api.url` 为空
+   - 系统使用本地 `config.yaml` 配置
+   - 使用 FunASR（本地模型）
+   - FunASR 在某些环境下导致输出流使用 ASCII 编码
+   - 触发编码错误
+
+#### 关键发现
+
+- 98d28cb3 → 7c7b88dc 之间代码没有变化
+- 问题由配置文件变化引起（`data/.config.yaml` 不在版本控制中）
+- 配置加载判断逻辑：`config/config_loader.py` 第 33 行
+
+#### 解决方案
+
+配置 `data/.config.yaml` 中的 `manager-api.url`，从 API 加载配置。
+
+#### 相关文档
+
+- [拍照功能ASCII编码错误问题分析总结](./拍照功能ASCII编码错误问题分析总结.md)
+- [配置加载逻辑详解](./配置加载逻辑详解.md)
+- [日志对比分析-完整版](./日志对比分析-完整版.md)
+- [门锁配置加载分析](./门锁配置加载分析.md)
+
+---
+
 ## 2026-02-09
 
 ### 智能门锁 AI 功能完整实现
@@ -6736,3 +6778,181 @@ python fix_httpx_encoding.py
 - 确保智能门锁访客意图识别和看护模式的 AI 功能正常运行
 
 ---
+
+## 2026-02-12
+
+### OpenAI Provider 工具调用调试日志增强
+
+#### 修改文件
+
+- `main/xiaozhi-server/core/providers/llm/openai/openai.py`
+
+#### 修改位置
+
+- `LLMProvider` 类的 `response_with_functions` 方法（第 108-122 行）
+
+#### 修改时间
+
+2026-02-12
+
+#### 变更内容
+
+在 `response_with_functions` 方法中，调用 OpenAI API 之前新增详细的调试日志输出：
+
+1. **工具数量统计**：
+   - 记录传递给 OpenAI 的 tools 参数数量
+   - 格式：`tools数量: {len(functions)}`
+
+2. **工具详情输出**：
+   - 遍历所有工具，逐个输出完整的 JSON 结构
+   - 使用 `json.dumps(tool, ensure_ascii=False, indent=2)` 格式化输出
+   - 保留中文字符，便于查看工具描述内容
+
+3. **异常处理**：
+   - 捕获工具序列化异常，记录错误信息
+   - 降级输出工具原始数据结构
+
+4. **日志分隔**：
+   - 使用 80 个等号作为分隔线，便于在日志中快速定位
+
+#### 功能说明
+
+增强 OpenAI Provider 的调试能力，用于诊断 ASCII 编码错误问题。通过详细记录传递给 OpenAI API 的所有工具参数，可以：
+
+- 确认工具数量是否正确（服务端插件 + 设备 MCP 工具 + 门锁工具）
+- 检查工具描述中是否包含中文字符
+- 定位哪个工具的序列化可能触发编码错误
+- 验证 `ensure_ascii=False` 参数是否正确使用
+
+此调试日志配合 `fix_httpx_encoding.py` 脚本，可完整追踪和解决 httpx 0.28.1 版本的中文编码 bug。
+
+#### 相关问题
+
+- 诊断拍照功能调用时的 ASCII 编码错误
+- 追踪门锁 AI 工具函数的中文描述序列化问题
+- 验证 httpx 降级后的编码修复效果
+
+#### 后续建议
+
+- 修复编码问题后，可将日志级别从 `info` 改为 `debug`，减少生产环境日志量
+- 或在确认问题解决后移除此调试代码
+
+---
+
+## 2026-02-12 (更新 22)
+
+### 修改文件
+
+- `main/xiaozhi-server/core/providers/llm/openai/openai.py`
+
+### 修改位置
+
+- `LLMProvider` 类的 `response_with_functions` 方法（第 143-170 行）
+
+### 修改时间
+
+2026-02-12
+
+### 变更内容
+
+在 `response_with_functions` 方法中，新增两组调试代码：
+
+1. **request_params 序列化测试**：
+   - 尝试序列化完整的 request_params（排除 tools 字段）
+   - 使用 `json.dumps(test_params, ensure_ascii=False, indent=2)` 测试序列化
+   - 捕获并记录序列化异常
+
+2. **dialogue 内容详细检查**：
+   - 尝试序列化完整的 dialogue 对话历史
+   - 当序列化失败时，逐条检查 dialogue 中的每条消息
+   - 记录每条消息的序列化结果或原始数据
+
+3. **日志分隔**：
+   - 使用 80 个等号作为分隔线，便于在日志中快速定位
+
+### 功能说明
+
+进一步增强 ASCII 编码错误的调试能力。在之前输出 tools 参数的基础上，新增对 request_params 和 dialogue 的序列化测试，可以：
+
+- 确认 request_params 中的其他参数（model_name、temperature 等）是否正常
+- 检查 dialogue 对话历史中是否包含无法序列化的内容
+- 定位具体是哪条消息或哪个字段触发了编码错误
+- 验证用户消息、系统提示词、AI 回复中的中文字符处理
+
+此调试代码配合之前的 tools 参数输出，可以全面追踪 OpenAI API 调用前的所有数据序列化情况，精确定位 ASCII 编码错误的触发点。
+
+### 相关问题
+
+- 诊断拍照功能调用时的 ASCII 编码错误
+- 追踪 dialogue 对话历史中的编码问题
+- 验证用户消息"你可以拍照吗？"的序列化情况
+- 确认系统提示词（台湾女生角色）的中文字符处理
+
+### 后续建议
+
+- 运行调试后，根据日志输出定位具体的编码错误位置
+- 确认问题解决后，可移除或注释掉调试代码以减少日志输出
+- 如需保留调试能力，可将日志级别从 `info` 改为 `debug`
+
+---
+
+---
+
+## 2026-02-12 (更新 22)
+
+### 移除 OpenAI Provider 调试代码
+
+#### 修改文件
+
+- `main/xiaozhi-server/core/providers/llm/openai/openai.py`
+
+#### 修改位置
+
+- `LLMProvider` 类的 `response_with_functions` 方法（第 105-122 行）
+
+#### 变更内容
+
+- 移除了用于调试 ASCII 编码错误的临时代码
+- 删除了 `import json` 导入语句
+- 删除了打印 tools 参数的调试日志（共 16 行）：
+  - tools 数量统计
+  - 每个 tool 的 JSON 序列化输出
+  - 序列化失败的错误处理
+
+#### 功能说明
+
+清理调试代码，恢复生产环境代码的简洁性。之前添加的调试代码用于排查 ASCII 编码错误问题，现已完成问题定位：
+
+**问题根源**：配置文件 `data/.config.yaml` 中 `manager-api.url` 为空，导致系统使用本地 `config.yaml` 配置，其中 ASR 模块配置为 FunASR（本地模型）。FunASR 输出的进度条包含 Unicode 字符，在某些环境下触发 ASCII 编码错误。
+
+**解决方案**：
+
+1. 配置 `manager-api.url` 使用远程 API 配置（DoubaoStreamASR）
+2. 或修改 `config.yaml` 将 ASR 改为 DoubaoStreamASR
+3. 或在 `fun_local.py` 中禁用 FunASR 进度条输出
+
+调试代码已完成使命，现予以移除以保持代码整洁。
+
+---
+
+## 2026-02-12
+
+### 修改文件
+
+- `main/xiaozhi-server/core/providers/llm/openai/openai.py`
+
+### 修改位置
+
+- `OpenAIProvider` 类的 `response_with_functions` 方法（第 105-122 行）
+
+### 变更内容
+
+- 移除调试代码块（共 16 行）
+- 删除 `import json` 导入语句
+- 删除打印 tools 参数的调试日志
+- 删除工具 JSON 序列化测试代码
+- 删除调试分隔线输出
+
+### 功能说明
+
+清理 OpenAI LLM 提供者中的临时调试代码。之前为排查 ASCII 编码错误问题添加的调试日志已完成使命，问题根源已定位为配置文件导致使用了错误的 ASR 模块（FunASR 进度条包含 Unicode 字符）。移除调试代码恢复生产环境代码的简洁性，提升代码可读性和执行效率。

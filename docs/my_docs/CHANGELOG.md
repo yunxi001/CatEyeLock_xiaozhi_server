@@ -6956,3 +6956,72 @@ python fix_httpx_encoding.py
 ### 功能说明
 
 清理 OpenAI LLM 提供者中的临时调试代码。之前为排查 ASCII 编码错误问题添加的调试日志已完成使命，问题根源已定位为配置文件导致使用了错误的 ASR 模块（FunASR 进度条包含 Unicode 字符）。移除调试代码恢复生产环境代码的简洁性，提升代码可读性和执行效率。
+
+---
+
+## 2026-02-12 (更新 2)
+
+### FunASR 进度条输出捕获修复
+
+#### 修改文件
+
+- `main/xiaozhi-server/core/providers/asr/fun_local.py`
+
+#### 修改位置
+
+- `ASRProvider` 类的 `speech_to_text` 方法（第 94-104 行）
+
+#### 变更内容
+
+- 将 FunASR 模型的 `generate()` 调用包裹在 `CaptureOutput()` 上下文管理器中
+- 移除了语音识别耗时的 debug 日志输出
+
+**修改前**：
+
+```python
+result = self.model.generate(
+    input=combined_pcm_data,
+    cache={},
+    language="auto",
+    use_itn=True,
+    batch_size_s=60,
+)
+text = rich_transcription_postprocess(result[0]["text"])
+logger.bind(tag=TAG).debug(
+    f"语音识别耗时: {time.time() - start_time:.3f}s | 结果: {text}"
+)
+```
+
+**修改后**：
+
+```python
+# 使用CaptureOutput捕获FunASR的进度条输出，避免Unicode字符导致的编码错误
+with CaptureOutput():
+    result = self.model.generate(
+        input=combined_pcm_data,
+        cache={},
+        language="auto",
+        use_itn=True,
+        batch_size_s=60,
+    )
+text = rich_transcription_postprocess(result[0]["text"])
+)
+```
+
+#### 功能说明
+
+实现拍照功能 ASCII 编码错误的修复方案之一。当系统使用 FunASR 本地模型时，模型会输出包含 Unicode 字符（如 `█`）的进度条。在某些环境下，如果输出流使用 ASCII 编码，这些 Unicode 字符会导致编码错误：`'ascii' codec can't encode characters in position 7-8: ordinal not in range(128)`。
+
+通过使用 `CaptureOutput()` 上下文管理器捕获 FunASR 的标准输出，将进度条内容重定向到 logger，避免直接输出到可能使用 ASCII 编码的标准输出流，从而解决编码错误问题。
+
+这是针对 ASCII 编码错误问题的三个修复方案之一：
+
+1. ✅ **方案1（推荐）**：配置 `manager-api.url`，从 API 加载配置，使用 DoubaoStreamASR
+2. ✅ **方案2（本次修改）**：捕获 FunASR 进度条输出，避免 Unicode 字符导致编码错误
+3. **方案3（备选）**：在 `app.py` 中强制使用 UTF-8 编码
+
+#### 相关文档
+
+- [拍照功能ASCII编码错误问题分析总结](./拍照功能ASCII编码错误问题分析总结.md)
+- [最终结论](./最终结论.md)
+- [配置加载逻辑详解](./配置加载逻辑详解.md)

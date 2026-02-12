@@ -4,6 +4,22 @@
 
 ## 目录结构
 
+### 📁 face-recognition/
+
+人脸识别功能相关文档（已完成）：
+
+- `face-data-storage-documentation.md` - 人脸数据存储文档
+- `face-recognition-requirements.md` - 人脸识别功能需求文档
+
+### 📁 smart-doorlock/
+
+智能门锁基础功能相关文档（已完成）：
+
+- `smart-doorlock-usage-guide.md` - 智能门锁功能使用指南
+- `smart-doorlock-test-guide.md` - 智能门锁功能测试指南
+- `smart-doorlock-protocol-extension.md` - 智能门锁协议扩展说明
+- `智能门锁项目开发文档.md` - 智能门锁项目开发文档
+
 ### 📁 deprecated-protocols/
 
 已被新版本替代的旧协议规范文档：
@@ -49,6 +65,20 @@ seq_id 机制修复相关文档：
 - `doorlock-user-management-implementation.md` - 门锁用户管理功能实现报告
 - `doorlock-user-management-migration-report.md` - 门锁用户管理数据库迁移报告
 
+**migrations/** 子目录（已完成的迁移脚本）：
+
+- `check_database_migration.py` - 数据库迁移检查脚本
+- `check_database.py` - 数据库状态检查脚本
+- `export_database_content.py` - 数据库内容导出脚本
+- `run_migration_simple.py` - 简化版迁移执行脚本
+- `run_add_doorlock_users.py` - 门锁用户表迁移脚本
+- `run_add_doorlock_users_simple.py` - 简化版门锁用户表迁移脚本
+- `run_doorlock_ai_migration.py` - 门锁AI功能迁移脚本
+- `verify_migration.py` - 迁移验证脚本
+- `verify_doorlock_ai_migration.py` - 门锁AI迁移验证脚本
+- `deploy_doorlock_ai.sh` - 门锁AI部署脚本
+- `rollback_doorlock_ai.sh` - 门锁AI回滚脚本
+
 ### 📁 bug-fixes/
 
 Bug 修复和功能改进文档：
@@ -58,6 +88,16 @@ Bug 修复和功能改进文档：
 - `query-exception-handling-fix.md` - 查询异常处理修复
 - `app-offline-connection.md` - App 离线连接功能说明
 - `app-offline-connection-improvements.md` - App 离线连接改进总结
+- `ASCII编码错误全面分析报告.md` - ASCII编码错误全面分析
+- `拍照功能ASCII编码错误-最终分析报告.md` - 拍照功能编码错误最终分析
+- `拍照功能ASCII编码错误问题分析总结.md` - 拍照功能编码错误总结
+- `拍照功能调用流程分析.md` - 拍照功能调用流程和ASCII编码错误分析
+- `最终结论.md` - ASCII编码问题最终结论
+- `当前工具中文字符检查报告.md` - 工具中文字符检查
+- `配置加载逻辑详解.md` - 配置加载逻辑说明
+- `门锁配置加载分析.md` - 门锁配置加载分析
+- `日志对比分析-完整版.md` - 日志对比分析
+- `data-config-yaml-Git历史分析.md` - 配置文件Git历史分析
 
 ### 📁 task-summaries/
 
@@ -65,6 +105,8 @@ Bug 修复和功能改进文档：
 
 - `TASK_7_SUMMARY.md` - LogReportHandler v5.2 协议升级
 - `TASK_9_SUMMARY.md` - 命令下发重试机制实现
+- `doorlock_api_implementation_summary.md` - 门锁AI功能HTTP API实现总结
+- `doorlock_prompts_summary.md` - 智能门锁AI提示词设计总结
 
 ### 📁 code-analysis/
 
@@ -94,6 +136,10 @@ Bug 修复和功能改进文档：
 - **2026-01-19**: 第二次归档，整理数据库优化、Bug 修复、任务总结文档
 - **2026-01-30**: 第三次归档，整理代码分析与修复文档、数据库分析文档
 - **2026-02-01**: 第四次归档，整理门锁用户管理功能实现和验证文档
+- **2026-02-12**: 第五次归档，整理ASCII编码错误分析、门锁AI功能实现总结
+- **2026-02-12**: 第六次归档，整理拍照功能调用流程分析文档
+- **2026-02-12**: 第七次归档，整理 migrations 目录中间文件，移动工具脚本到 scripts 目录
+- **2026-02-12**: 第八次归档，整理已完成功能的文档（人脸识别、智能门锁基础功能）
 
 ## 说明
 

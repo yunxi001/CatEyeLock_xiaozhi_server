@@ -91,20 +91,6 @@
 - 媒体文件下载
 - 实时数据推送
 
----
-
-### 🔷 开发指南文档
-
-#### 智能门锁项目开发文档.md
-
-**用途**: 智能门锁功能开发指南  
-**包含内容**:
-
-- 功能模块说明
-- 开发规范
-- 接口说明
-- 测试方法
-
 #### project-analysis.md
 
 **用途**: 项目整体分析文档  
@@ -114,6 +100,61 @@
 - 技术选型
 - 模块划分
 - 开发计划
+
+---
+
+### 🔷 功能实现文档
+
+#### dialogue-class-explanation.md
+
+**用途**: Dialogue 类详细使用说明  
+**包含内容**:
+
+- Dialogue 类结构
+- 核心方法说明
+- 对话上下文管理
+- 长期记忆注入
+- 说话人识别
+- 工具调用管理
+
+#### doorlock-api-documentation.md
+
+**用途**: 智能门锁 AI 功能 HTTP API 接口文档  
+**包含内容**:
+
+- 设备配置 API
+- 看护模式控制 API
+- 欢迎词配置 API
+- 历史记录查询 API
+
+#### esp32-vision-guide.md
+
+**用途**: ESP32 视觉拍照功能使用指南  
+**包含内容**:
+
+- 服务器调用 ESP32 拍照
+- ESP32 拍照和上传
+- 服务器端处理和返回
+- 实现连续对话和工具调用
+
+#### mcp-vision-detailed-analysis.md
+
+**用途**: MCP Vision 拍照识物功能详细分析  
+**包含内容**:
+
+- 服务器端 HTTP 接口详细分析
+- ESP32 端 MCP 工具调用格式详细分析
+- 上下文处理机制分析
+
+#### vllm-continuous-dialogue-implementation.md
+
+**用途**: VLLM 连续对话实现方案  
+**包含内容**:
+
+- 方案选择和对比
+- 扩展 VLLM 接口实现
+- 缓存图片和对话历史
+- 配置示例
 
 ---
 
@@ -151,54 +192,6 @@
 
 ---
 
-### 🔷 功能扩展文档
-
-#### smart-doorlock-protocol-extension.md
-
-**用途**: 智能门锁协议扩展说明  
-**包含内容**:
-
-- 新增消息类型
-- 扩展字段说明
-- 向后兼容性
-- 实现建议
-
-#### face-recognition-requirements.md
-
-**用途**: 人脸识别功能需求文档  
-**包含内容**:
-
-- 功能需求
-- 技术方案
-- 接口设计
-- 性能要求
-
----
-
-### 🔷 测试与使用指南
-
-#### smart-doorlock-test-guide.md
-
-**用途**: 智能门锁功能测试指南  
-**包含内容**:
-
-- 测试环境搭建
-- 测试用例
-- 测试工具使用
-- 问题排查
-
-#### smart-doorlock-usage-guide.md
-
-**用途**: 智能门锁功能使用指南  
-**包含内容**:
-
-- 功能介绍
-- 使用流程
-- 配置说明
-- 常见问题
-
----
-
 ### 🔷 App 连接相关文档
 
 #### app-offline-connection-README.md
@@ -211,24 +204,33 @@
 - 日志输出说明
 - 使用示例
 
-#### app-connection-example.html
+---
 
-**用途**: App WebSocket 连接测试页面  
+### 🔷 智能门锁 AI 功能文档（开发中）
+
+#### smart-doorlock-ai-requirements.md
+
+**用途**: 智能门锁 AI 功能需求文档  
 **包含内容**:
 
-- 连接示例代码
-- 消息发送测试
-- 响应接收展示
-- 调试工具
+- 访客意图识别功能需求
+- 快递看护模式功能需求
+- 个性化欢迎词功能需求
+- 数据存储需求
 
 ---
 
-### 🔷 工具脚本
+### 🔷 问题分析文档
 
-#### restore-timeout-mechanism.sh / restore-timeout-mechanism.bat
+#### 受影响文件最终报告.md
 
-**用途**: 恢复 ESP32 连接超时机制的脚本  
-**说明**: 用于在需要时快速恢复超时检测功能
+**用途**: Git checkout 影响文件报告  
+**状态**: 问题尚未解决  
+**包含内容**:
+
+- 受影响文件列表
+- 问题分析
+- 待处理事项
 
 ---
 
@@ -250,6 +252,8 @@
 
 已完成的开发任务相关文档已归档到 `docs/completed/` 目录，按类别组织：
 
+- **face-recognition/** - 人脸识别功能文档
+- **smart-doorlock/** - 智能门锁基础功能文档
 - **deprecated-protocols/** - 旧版本协议文档
 - **protocol-upgrade/** - 协议升级过程文档
 - **seq-id-fix/** - seq_id 机制修复文档
@@ -276,9 +280,12 @@
 | App 数据处理流程       | `app-data-processing-detailed-analysis.md`           |
 | 代码实现细节           | `xiaozhi-server-detailed-analysis.md`                |
 | seq_id 如何使用        | `seq_id使用规范与注意事项.md`                        |
-| 如何测试门锁功能       | `smart-doorlock-test-guide.md`                       |
-| 如何使用门锁功能       | `smart-doorlock-usage-guide.md`                      |
 | App 离线连接机制       | `app-offline-connection-README.md`                   |
+| 门锁 AI 功能 API       | `doorlock-api-documentation.md`                      |
+| 视觉拍照功能           | `esp32-vision-guide.md`                              |
+| MCP Vision 详细分析    | `mcp-vision-detailed-analysis.md`                    |
+| VLLM 连续对话          | `vllm-continuous-dialogue-implementation.md`         |
+| Dialogue 类使用        | `dialogue-class-explanation.md`                      |
 | 项目变更历史           | `CHANGELOG.md`                                       |
 
 ---
@@ -289,7 +296,7 @@
 
 1. **协议文档**: 协议变更时必须同步更新，保持版本号一致
 2. **架构文档**: 重大架构调整时更新
-3. **开发指南**: 新增功能或流程变更时更新
+3. **功能文档**: 新增功能或流程变更时更新
 4. **CHANGELOG**: 每次重要变更都要记录
 
 ### 文档归档规则
@@ -301,12 +308,21 @@
 - 任务完成总结
 - 代码分析报告
 - 旧版本协议文档
+- 已完成功能的需求和测试文档
 
 ### 文档命名规范
 
 - 中文文档：使用中文命名，描述清晰
 - 英文文档：使用小写字母和连字符，如 `smart-doorlock-test-guide.md`
 - 版本号：在文件名或文档标题中明确标注版本号
+
+---
+
+## 🔧 工具脚本
+
+工具脚本已移至 `main/xiaozhi-server/scripts/` 目录：
+
+- `restore-timeout-mechanism.sh` / `restore-timeout-mechanism.bat` - 恢复 ESP32 连接超时机制
 
 ---
 

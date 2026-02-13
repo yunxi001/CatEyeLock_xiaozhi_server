@@ -7025,3 +7025,252 @@ text = rich_transcription_postprocess(result[0]["text"])
 - [拍照功能ASCII编码错误问题分析总结](./拍照功能ASCII编码错误问题分析总结.md)
 - [最终结论](./最终结论.md)
 - [配置加载逻辑详解](./配置加载逻辑详解.md)
+
+---
+
+## 2026-02-13 16:00 - 门锁AI功能数据模型重构
+
+### 修改文件
+
+- `main/xiaozhi-server/core/providers/doorlock/models.py`
+
+### 变更位置
+
+完全重写整个文件，替换原有的门锁基础数据模型为门锁AI功能专用数据模型。
+
+### 变更内容
+
+#### 删除的旧模型类
+
+1. **Person** - 人员信息类
+2. **AccessPermission** - 开门权限类
+3. **VisitRecord** - 到访记录类
+4. **RecognitionResult** - 识别结果类
+
+以及相关的枚举常量：
+
+- `RELATION_TYPES` - 关系类型枚举
+- `PERMISSION_TYPES` - 权限类型枚举
+- `DAY_TYPES` - 时段类型枚举
+- `RECOGNITION_RESULTS` - 识别结果枚举
+
+#### 新增的AI功能模型类
+
+1. **DoorlockConfig** - 门锁设备配置类
+   - 字段：`device_id`, `intent_recognition_enabled`, `package_guard_available`, `package_guard_active`, `package_baseline_image`, `package_guard_start_time`, `created_at`, `updated_at`
+   - 方法：`to_dict()`, `to_json()`, `from_dict()`, `from_json()`
+
+2. **VisitorIntent** - 访客意图识别记录类
+   - 字段：`session_id`, `id`, `visit_id`, `person_id`, `intent_type`, `intent_summary`, `dialogue_history`, `created_at`
+   - 方法：`to_dict()`, `to_json()`, `from_dict()`, `from_json()`, `get_intent_summary_json()`, `get_dialogue_history_json()`
+
+3. **PackageAlert** - 快递异常警报记录类
+   - 字段：`device_id`, `session_id`, `threat_level`, `action`, `id`, `description`, `photo_path`, `voice_warning_sent`, `notified`, `created_at`
+   - 方法：`to_dict()`, `to_json()`, `from_dict()`, `from_json()`, `is_high_threat()`, `is_medium_threat()`, `is_low_threat()`, `needs_notification()`
+
+4. **DoorlockSession** - 门锁会话数据类
+   - 字段：`session_id`, `device_id`, `dialogue_history`, `photo_records`, `last_activity`, `created_at`, `person_id`, `person_name`, `is_owner`
+   - 方法：`add_dialogue()`, `add_photo()`, `get_recent_dialogue()`, `clear_old_dialogue()`, `get_silence_duration()`, `is_timeout()`, `to_dict()`, `to_json()`, `from_dict()`, `from_json()`
+
+#### 依赖变更
+
+- 移除：`numpy` 依赖（原用于人脸编码存储）
+- 移除：`date`, `time` 类型（原用于权限时间管理）
+- 新增：`asdict` 从 `dataclasses`（用于数据类转字典）
+- 新增：`json` 模块（用于 JSON 序列化）
+- 统一使用：`Dict`, `Any` 类型注解
+
+### 功能说明
+
+此次重构将门锁数据模型从**基础人脸识别和权限管理**转变为**AI驱动的智能交互功能**，支持以下核心能力：
+
+1. **设备配置管理**：通过 `DoorlockConfig` 管理每个设备的AI功能开关状态（意图识别、看护模式）
+
+2. **访客意图识别**：通过 `VisitorIntent` 记录访客到访意图（送快递/拜访/推销/维修等），存储对话历史和意图总结
+
+3. **快递看护警报**：通过 `PackageAlert` 记录看护模式下检测到的异常行为（偷窃/翻找/破坏），支持威胁等级判断和通知决策
+
+4. **会话管理**：通过 `DoorlockSession` 管理访客交互会话，支持对话历史管理、拍照记录、超时检测等
+
+所有数据类均提供完整的序列化/反序列化方法（`to_dict`, `to_json`, `from_dict`, `from_json`），支持与数据库和API的无缝集成。
+
+### 影响范围
+
+此变更会影响所有依赖旧模型类的代码模块，包括但不限于：
+
+- `core/providers/doorlock/database.py` - 数据库操作层
+- `core/providers/doorlock/__init__.py` - 模块初始化
+- 门锁相关的 API 处理器
+- 门锁相关的消息处理器
+
+需要配合数据库迁移脚本和相关业务逻辑的更新。
+
+### 相关文档
+
+- [受影响文件最终报告](./受影响文件最终报告.md)
+- `.kiro/specs/smart-doorlock-ai/` - 智能门锁AI功能规格文档
+
+---
+
+## 2026-02-13
+
+### 新增门锁图片上传路由
+
+#### 修改文件
+
+- `main/xiaozhi-server/core/http_server.py`
+
+#### 修改位置
+
+- `SimpleHttpServer` 类的 `start` 方法中的路由配置部分（第 61-63 行）
+
+#### 修改时间
+
+2026-02-13
+
+#### 变更内容
+
+在 HTTP 服务器的路由配置中新增门锁图片上传相关路由：
+
+```python
+# 门锁图片上传路由
+web.post("/doorlock/image/upload", self.image_upload_handler.handle_post),
+web.options("/doorlock/image/upload", self.image_upload_handler.handle_options),
+```
+
+#### 功能说明
+
+为智能门锁AI功能提供图片上传 HTTP API 接口。支持 POST 和 OPTIONS 请求方法，用于处理门锁设备或 App 上传的图片数据（如访客照片、快递照片等）。该接口由 `ImageUploadHandler` 处理，支持 CORS 跨域请求，便于前端应用调用。
+
+#### 相关组件
+
+- `ImageUploadHandler` - 图片上传处理器（在 `__init__` 方法中已初始化）
+- 路由路径：`/doorlock/image/upload`
+- 支持方法：POST（上传）、OPTIONS（CORS 预检）
+
+---
+
+## 2026-02-13
+
+### HTTP 服务器集成门锁 AI 功能 API 处理器
+
+#### 修改文件
+
+- `main/xiaozhi-server/core/http_server.py`
+
+#### 修改位置
+
+1. **文件头部 import 区域**（第 7-10 行）：
+   - 新增 4 个门锁 AI 功能 API 处理器的导入语句
+
+2. **SimpleHttpServer 类的 `__init__` 方法**（第 22-28 行）：
+   - 在初始化方法中实例化 4 个门锁 AI 功能 API 处理器
+
+#### 变更内容
+
+1. **新增导入语句**：
+
+   ```python
+   from core.api.doorlock_config_handler import DoorlockConfigHandler
+   from core.api.doorlock_guard_handler import DoorlockGuardHandler
+   from core.api.doorlock_welcome_handler import DoorlockWelcomeHandler
+   from core.api.doorlock_history_handler import DoorlockHistoryHandler
+   ```
+
+2. **新增处理器实例化**：
+   ```python
+   # 门锁AI功能API处理器
+   self.doorlock_config_handler = DoorlockConfigHandler(config)
+   self.doorlock_guard_handler = DoorlockGuardHandler(config)
+   self.doorlock_welcome_handler = DoorlockWelcomeHandler(config)
+   self.doorlock_history_handler = DoorlockHistoryHandler(config)
+   ```
+
+#### 功能说明
+
+将智能门锁 AI 功能的 4 个 HTTP API 处理器集成到 HTTP 服务器中。这些处理器分别负责：
+
+- `DoorlockConfigHandler`: 设备配置管理（GET/POST /api/doorlock/config）
+- `DoorlockGuardHandler`: 看护模式控制（POST /api/doorlock/package_guard/start, stop）
+- `DoorlockWelcomeHandler`: 欢迎词配置（GET/POST /api/doorlock/welcome/config, GET templates）
+- `DoorlockHistoryHandler`: 历史记录查询（GET /api/doorlock/intents/history, alerts/history）
+
+此修改完成了任务 7.1-7.4 中定义的 HTTP API 路由注册的前置准备工作，使 HTTP 服务器能够处理门锁 AI 功能相关的 API 请求。
+
+#### 相关任务
+
+- 任务 7.1: 实现设备配置API
+- 任务 7.2: 实现看护模式控制API
+- 任务 7.3: 实现欢迎词配置API
+- 任务 7.4: 实现历史记录查询API
+
+#### 相关文档
+
+- [API 文档](./doorlock-api-documentation.md)
+- [任务规范](../../.kiro/specs/smart-doorlock-ai/tasks.md)
+
+---
+
+## 2026-02-13
+
+### 新增智能门锁AI功能集成测试脚本
+
+#### 新增文件
+
+- `main/xiaozhi-server/test_doorlock_integration.py`
+
+#### 变更内容
+
+新增完整的集成测试脚本，包含以下测试功能：
+
+1. **模块导入测试** (`test_imports` 函数)
+   - 测试数据模型导入（DoorlockConfig, VisitorIntent, PackageAlert, DoorlockSession）
+   - 测试数据库服务导入（DoorlockDatabase）
+   - 测试会话管理器导入（SessionManager）
+   - 测试看护模式管理器导入（PackageGuardManager）
+   - 测试通知服务导入（NotificationService）
+   - 测试工具函数导入（DoorlockTools）
+   - 测试人脸识别处理器导入（FaceRecognitionHandler）
+   - 测试欢迎词处理器导入（GreetingHandler）
+   - 测试意图识别处理器导入（DoorlockIntentHandler）
+   - 测试API处理器导入（4个处理器）
+   - 测试HTTP服务器导入（SimpleHttpServer）
+
+2. **配置文件测试** (`test_config` 函数)
+   - 测试主配置文件 `config.yaml` 加载
+   - 验证 doorlock 配置段完整性（package_guard, intent_recognition, face_recognition, performance）
+   - 测试提示词配置文件 `config/doorlock_prompts.yaml` 加载
+   - 验证提示词配置完整性（intent_recognition_prompt, package_guard_prompt, welcome_templates）
+
+3. **数据模型功能测试** (`test_data_models` 函数)
+   - 测试 DoorlockConfig 序列化/反序列化（to_dict, to_json, from_json）
+   - 测试 VisitorIntent 序列化功能
+   - 测试 PackageAlert 序列化功能
+   - 测试 DoorlockSession 对话管理功能（add_dialogue）
+
+4. **文件结构测试** (`test_file_structure` 函数)
+   - 验证18个必需文件是否存在
+   - 包括核心服务、API处理器、配置文件、迁移脚本等
+
+5. **测试报告功能** (`print_summary` 函数)
+   - 统计测试总数、通过数、失败数
+   - 计算成功率
+   - 列出失败的测试项
+
+#### 功能说明
+
+提供一键验证智能门锁AI功能完整性的集成测试工具，可快速检测：
+
+- 所有模块是否可正常导入
+- 配置文件是否完整且格式正确
+- 数据模型是否正常工作
+- 文件结构是否完整
+
+运行方式：
+
+```bash
+cd main/xiaozhi-server
+python test_doorlock_integration.py
+```
+
+测试输出包含详细的通过/失败信息和统计报告，便于快速定位问题。

@@ -27,49 +27,6 @@ TAG = "DoorlockIntentHandler"
 class DoorlockIntentHandler:
     """门锁意图识别对话处理器"""
     
-    @classmethod
-    async def create_from_config(cls, config: dict, logger_instance):
-        """从配置创建处理器实例（工厂方法）
-        
-        Args:
-            config: 配置字典
-            logger_instance: 日志实例
-            
-        Returns:
-            DoorlockIntentHandler实例
-        """
-        # 加载门锁配置
-        doorlock_config = config.get('doorlock', {})
-        
-        # 初始化各个组件
-        face_handler = FaceRecognitionHandler(config, logger_instance)
-        greeting_handler = GreetingHandler(config, logger_instance)
-        session_manager = SessionManager(logger_instance)
-        notification_service = NotificationService(config, logger_instance)
-        doorlock_database = DoorlockDatabase(config)
-        
-        # 初始化VLLM提供者
-        vllm_provider = None
-        if 'VLLM' in config and config.get('selected_module', {}).get('VLLM'):
-            try:
-                vllm_provider = DoorlockVLLMProvider(config, logger_instance)
-            except Exception as e:
-                logger_instance.bind(tag=TAG).warning(f"VLLM提供者初始化失败: {e}")
-        
-        return cls(
-            face_recognition_handler=face_handler,
-            greeting_handler=greeting_handler,
-            session_manager=session_manager,
-            notification_service=notification_service,
-            doorlock_database=doorlock_database,
-            vllm_provider=vllm_provider,
-            config=doorlock_config
-        )
-
-
-class DoorlockIntentHandler:
-    """门锁意图识别对话处理器"""
-    
     def __init__(
         self,
         face_recognition_handler: FaceRecognitionHandler,
@@ -109,6 +66,45 @@ class DoorlockIntentHandler:
         logger.bind(tag=TAG).info(
             f"意图识别处理器初始化完成: timeout={self.dialogue_timeout}s, "
             f"max_rounds={self.max_dialogue_rounds}"
+        )
+    
+    @classmethod
+    async def create_from_config(cls, config: dict, logger_instance):
+        """从配置创建处理器实例（工厂方法）
+        
+        Args:
+            config: 配置字典
+            logger_instance: 日志实例
+            
+        Returns:
+            DoorlockIntentHandler实例
+        """
+        # 加载门锁配置
+        doorlock_config = config.get('doorlock', {})
+        
+        # 初始化各个组件
+        face_handler = FaceRecognitionHandler(config, logger_instance)
+        greeting_handler = GreetingHandler(config, logger_instance)
+        session_manager = SessionManager(logger_instance)
+        notification_service = NotificationService()
+        doorlock_database = DoorlockDatabase(logger_instance)
+        
+        # 初始化VLLM提供者
+        vllm_provider = None
+        if 'VLLM' in config and config.get('selected_module', {}).get('VLLM'):
+            try:
+                vllm_provider = DoorlockVLLMProvider(config, logger_instance)
+            except Exception as e:
+                logger_instance.bind(tag=TAG).warning(f"VLLM提供者初始化失败: {e}")
+        
+        return cls(
+            face_recognition_handler=face_handler,
+            greeting_handler=greeting_handler,
+            session_manager=session_manager,
+            notification_service=notification_service,
+            doorlock_database=doorlock_database,
+            vllm_provider=vllm_provider,
+            config=doorlock_config.get('intent_recognition', {})
         )
     
     async def handle_visitor(

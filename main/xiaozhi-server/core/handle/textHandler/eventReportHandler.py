@@ -110,9 +110,71 @@ class EventReportHandler(TextMessageHandler):
         conn.logger.bind(tag=TAG).info("门铃按下")
 
     async def _handle_pir_event(self, conn, ts: int, param):
-        """处理 PIR 人体检测事件"""
+        """处理 PIR 人体检测事件
+        
+        集成智能门锁AI功能：
+        1. 检查设备配置（intent_recognition_enabled）
+        2. 检查看护模式状态（package_guard_active）
+        3. 触发意图识别处理器
+        4. 如果看护模式激活，同时启动监控和对话
+        """
         duration = param  # 持续时间（秒）
         conn.logger.bind(tag=TAG).info(f"PIR 检测到人体，持续 {duration} 秒")
+        
+        # 检查是否启用了智能门锁AI功能
+        try:
+            from core.providers.doorlock.doorlock_database import DoorlockDatabase
+            from core.handle.doorlock_intent_handler import DoorlockIntentHandler
+            from core.providers.doorlock.package_guard_manager import PackageGuardManager
+            
+            # 获取设备配置
+            db = DoorlockDatabase(conn.logger)
+            config = await db.get_config(conn.device_id)
+            
+            if not config:
+                conn.logger.bind(tag=TAG).debug(f"设备 {conn.device_id} 未配置智能门锁AI功能")
+                return
+            
+            # 检查是否启用意图识别
+            if not config.intent_recognition_enabled:
+                conn.logger.bind(tag=TAG).debug(f"设备 {conn.device_id} 未启用意图识别功能")
+                return
+            
+            conn.logger.bind(tag=TAG).info(f"设备 {conn.device_id} 触发智能门锁AI处理流程")
+            
+            # 创建意图识别处理器（使用工厂方法）
+            intent_handler = await DoorlockIntentHandler.create_from_config(
+                config=conn.config,
+                logger_instance=conn.logger
+            )
+            
+            # 检查看护模式状态
+            guard_manager = PackageGuardManager(conn.config, conn.logger)
+            is_guard_active = await guard_manager.is_active(conn.device_id)
+            
+            # 处理访客到访（会自动处理人脸识别、意图识别对话等）
+            # 如果看护模式激活，会同时启动监控和对话
+            result = await intent_handler.handle_visitor(
+                device_id=conn.device_id,
+                conn=conn,
+                guard_active=is_guard_active
+            )
+            
+            if result.get("success"):
+                conn.logger.bind(tag=TAG).info(
+                    f"设备 {conn.device_id} 智能门锁AI处理完成: action={result.get('action')}"
+                )
+            else:
+                conn.logger.bind(tag=TAG).warning(
+                    f"设备 {conn.device_id} 智能门锁AI处理失败: {result.get('error')}"
+                )
+            
+        except ImportError as e:
+            conn.logger.bind(tag=TAG).debug(f"智能门锁AI模块未安装: {e}")
+        except Exception as e:
+            conn.logger.bind(tag=TAG).error(f"处理智能门锁AI功能失败: {e}")
+            import traceback
+            conn.logger.bind(tag=TAG).error(traceback.format_exc())
 
     async def _handle_tamper_event(self, conn, ts: int, param):
         """处理撬锁报警事件"""

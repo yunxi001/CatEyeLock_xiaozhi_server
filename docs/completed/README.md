@@ -98,6 +98,12 @@ Bug 修复和功能改进文档：
 - `门锁配置加载分析.md` - 门锁配置加载分析
 - `日志对比分析-完整版.md` - 日志对比分析
 - `data-config-yaml-Git历史分析.md` - 配置文件Git历史分析
+- `task5_files_recovery_report.md` - Task 5 文件恢复报告
+- `task7_recovery_summary.md` - Task 7 恢复总结
+- `task7_files_recovery_report.md` - Task 7 文件恢复报告
+- `文件恢复报告.md` - 文件恢复报告
+- `任务3文件恢复报告.md` - 任务3文件恢复报告
+- `受影响文件最终报告.md` - 受影响文件最终报告
 
 ### 📁 task-summaries/
 
@@ -107,6 +113,8 @@ Bug 修复和功能改进文档：
 - `TASK_9_SUMMARY.md` - 命令下发重试机制实现
 - `doorlock_api_implementation_summary.md` - 门锁AI功能HTTP API实现总结
 - `doorlock_prompts_summary.md` - 智能门锁AI提示词设计总结
+- `smart-doorlock-ai-final-verification-report.md` - 智能门锁AI功能最终验证报告
+- `test-file-location-review.md` - 测试文件位置审查报告
 
 ### 📁 code-analysis/
 
@@ -140,6 +148,8 @@ Bug 修复和功能改进文档：
 - **2026-02-12**: 第六次归档，整理拍照功能调用流程分析文档
 - **2026-02-12**: 第七次归档，整理 migrations 目录中间文件，移动工具脚本到 scripts 目录
 - **2026-02-12**: 第八次归档，整理已完成功能的文档（人脸识别、智能门锁基础功能）
+- **2026-02-13**: 第九次归档，整理智能门锁AI功能开发过程中的临时文件和验证报告
+- **2026-02-13**: 第十次归档，全面整理项目文件结构，归档文件恢复报告，整理测试和脚本目录
 
 ## 说明
 

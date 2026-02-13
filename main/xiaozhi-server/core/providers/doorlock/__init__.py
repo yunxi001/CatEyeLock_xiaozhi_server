@@ -1,23 +1,26 @@
-# 智能门锁人脸识别模块
-from .models import Person, AccessPermission, VisitRecord, RecognitionResult
-from .database import Database
+"""
+智能门锁AI功能模块
+
+此模块提供门锁AI功能的核心实现，包括：
+- 访客意图识别
+- 快递看护模式
+- 会话管理
+- 数据库操作
+"""
+
+from .models import (
+    DoorlockConfig,
+    VisitorIntent,
+    PackageAlert,
+    DoorlockSession
+)
+
 from .face_service import FaceService
-from .lock_controller import LockController
-from .device_controller import DeviceController
-from .user_manager import UserManager
-from .media_storage import MediaStorage
-from .video_recorder import VideoRecorder
 
 __all__ = [
-    'Person',
-    'AccessPermission', 
-    'VisitRecord',
-    'RecognitionResult',
-    'Database',
-    'FaceService',
-    'LockController',
-    'DeviceController',
-    'UserManager',
-    'MediaStorage',
-    'VideoRecorder',
+    'DoorlockConfig',
+    'VisitorIntent',
+    'PackageAlert',
+    'DoorlockSession',
+    'FaceService'
 ]

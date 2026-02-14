@@ -29,6 +29,9 @@
 - `face-data-storage-documentation.md` - 人脸数据存储文档
 - `face-recognition-requirements.md` - 人脸识别功能需求文档
 - `face_recognition库api文档.md` - face_recognition 库 API 文档
+- `server-trigger-face-recognition-task-plan.md` - 服务器触发人脸识别完整实施方案
+- `server-trigger-face-recognition-implementation-checklist.md` - 服务器触发人脸识别任务检查清单
+- `server-trigger-face-recognition-test-report.md` - 服务器触发人脸识别测试报告
 
 ### 📁 smart-doorlock/
 
@@ -170,6 +173,7 @@ Bug 修复和功能改进文档：
 - **2026-02-13**: 第十次归档，全面整理项目文件结构，归档文件恢复报告，整理测试和脚本目录
 - **2026-02-13**: 第十一次归档，整理智能门锁 AI Token 限制和 VLLM 配置相关文档
 - **2026-02-13**: 第十二次归档，整理 docs/completed 根目录下的未分类文档，更新 docs/my_docs/README.md
+- **2026-02-14**: 第十三次归档，归档服务器触发人脸识别功能开发文档（任务计划、检查清单、测试报告）
 
 ## 说明
 

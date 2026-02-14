@@ -106,22 +106,57 @@ class EventReportHandler(TextMessageHandler):
             conn.logger.bind(tag=TAG).warning(f"保存事件到数据库失败: {e}")
 
     async def _handle_bell_event(self, conn, ts: int, param):
-        """处理门铃事件"""
+        """处理门铃事件
+        
+        门铃按下时触发人脸识别流程
+        """
         conn.logger.bind(tag=TAG).info("门铃按下")
+        
+        # 触发人脸识别流程
+        await self._trigger_face_recognition(
+            conn=conn,
+            ts=ts,
+            param=param,
+            trigger_type="bell"
+        )
 
     async def _handle_pir_event(self, conn, ts: int, param):
         """处理 PIR 人体检测事件
         
-        集成智能门锁AI功能：
-        1. 检查设备配置（intent_recognition_enabled）
-        2. 检查看护模式状态（package_guard_active）
-        3. 触发意图识别处理器
-        4. 如果看护模式激活，同时启动监控和对话
+        PIR检测到人体时触发人脸识别流程
         """
         duration = param  # 持续时间（秒）
         conn.logger.bind(tag=TAG).info(f"PIR 检测到人体，持续 {duration} 秒")
         
-        # 检查是否启用了智能门锁AI功能
+        # 触发人脸识别流程
+        await self._trigger_face_recognition(
+            conn=conn,
+            ts=ts,
+            param=param,
+            trigger_type="pir"
+        )
+    
+    async def _trigger_face_recognition(
+        self,
+        conn,
+        ts: int,
+        param: int,
+        trigger_type: str
+    ):
+        """统一的人脸识别触发方法
+        
+        集成智能门锁AI功能：
+        1. 检查设备配置（face_recognition_enabled, intent_recognition_enabled）
+        2. 检查看护模式状态（package_guard_active）
+        3. 触发意图识别处理器
+        4. 如果看护模式激活，同时启动监控和对话
+        
+        Args:
+            conn: 连接对象
+            ts: 时间戳
+            param: 事件参数
+            trigger_type: 触发类型（bell/pir）
+        """
         try:
             from core.providers.doorlock.doorlock_database import DoorlockDatabase
             from core.handle.doorlock_intent_handler import DoorlockIntentHandler
@@ -132,15 +167,29 @@ class EventReportHandler(TextMessageHandler):
             config = await db.get_config(conn.device_id)
             
             if not config:
-                conn.logger.bind(tag=TAG).debug(f"设备 {conn.device_id} 未配置智能门锁AI功能")
+                conn.logger.bind(tag=TAG).debug(
+                    f"设备 {conn.device_id} 未配置智能门锁AI功能"
+                )
+                return
+            
+            # 检查是否启用人脸识别功能
+            if not config.face_recognition_enabled:
+                conn.logger.bind(tag=TAG).debug(
+                    f"设备 {conn.device_id} 未启用人脸识别功能"
+                )
                 return
             
             # 检查是否启用意图识别
             if not config.intent_recognition_enabled:
-                conn.logger.bind(tag=TAG).debug(f"设备 {conn.device_id} 未启用意图识别功能")
+                conn.logger.bind(tag=TAG).debug(
+                    f"设备 {conn.device_id} 未启用意图识别功能"
+                )
                 return
             
-            conn.logger.bind(tag=TAG).info(f"设备 {conn.device_id} 触发智能门锁AI处理流程")
+            conn.logger.bind(tag=TAG).info(
+                f"设备 {conn.device_id} 触发智能门锁AI处理流程 - "
+                f"触发类型: {trigger_type}"
+            )
             
             # 创建意图识别处理器（使用工厂方法）
             intent_handler = await DoorlockIntentHandler.create_from_config(
@@ -162,17 +211,21 @@ class EventReportHandler(TextMessageHandler):
             
             if result.get("success"):
                 conn.logger.bind(tag=TAG).info(
-                    f"设备 {conn.device_id} 智能门锁AI处理完成: action={result.get('action')}"
+                    f"设备 {conn.device_id} 智能门锁AI处理完成 - "
+                    f"触发类型: {trigger_type}, action={result.get('action')}"
                 )
             else:
                 conn.logger.bind(tag=TAG).warning(
-                    f"设备 {conn.device_id} 智能门锁AI处理失败: {result.get('error')}"
+                    f"设备 {conn.device_id} 智能门锁AI处理失败 - "
+                    f"触发类型: {trigger_type}, error={result.get('error')}"
                 )
             
         except ImportError as e:
             conn.logger.bind(tag=TAG).debug(f"智能门锁AI模块未安装: {e}")
         except Exception as e:
-            conn.logger.bind(tag=TAG).error(f"处理智能门锁AI功能失败: {e}")
+            conn.logger.bind(tag=TAG).error(
+                f"处理智能门锁AI功能失败 - 触发类型: {trigger_type}, 错误: {e}"
+            )
             import traceback
             conn.logger.bind(tag=TAG).error(traceback.format_exc())
 

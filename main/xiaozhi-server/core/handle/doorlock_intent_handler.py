@@ -168,19 +168,27 @@ class DoorlockIntentHandler:
                 )
                 
                 if has_permission:
-                    # 有权限：播放欢迎词并开门
+                    # 有权限：下发face_result消息并播放欢迎词
                     logger.bind(tag=TAG).info(
                         f"访客有开门权限 - 人员: {person.name} (ID: {person.id})"
                     )
                     
+                    # 下发face_result消息（ESP32会根据granted字段自动开锁）
+                    await self._send_face_result(
+                        conn=conn,
+                        result="known",
+                        user_id=person.id,
+                        access_granted=True,
+                        reason="authorized_user"
+                    )
+                    
+                    # 播放欢迎词
                     await self.greeting_handler.play_welcome_greeting(
                         device_id=device_id,
                         person_id=person.id,
                         person_name=person.name,
                         conn=conn
                     )
-                    
-                    # TODO: 触发开门操作
                     
                     # 清除会话
                     await self.session_manager.cleanup_session(session_id)
@@ -191,6 +199,33 @@ class DoorlockIntentHandler:
                         "person_id": person.id,
                         "person_name": person.name
                     }
+                else:
+                    # 无权限：下发face_result消息（拒绝开锁）
+                    logger.bind(tag=TAG).info(
+                        f"访客无开门权限 - 人员: {person.name} (ID: {person.id})"
+                    )
+                    
+                    await self._send_face_result(
+                        conn=conn,
+                        result="known",
+                        user_id=person.id,
+                        access_granted=False,
+                        reason="unauthorized_user"
+                    )
+            else:
+                # 识别失败：下发face_result消息
+                result = recognition_result.get("result", "error")
+                logger.bind(tag=TAG).info(
+                    f"人脸识别失败 - 结果: {result}"
+                )
+                
+                await self._send_face_result(
+                    conn=conn,
+                    result=result,
+                    user_id=None,
+                    access_granted=False,
+                    reason="unauthorized_user"
+                )
             
             # 步骤4: 无权限或识别失败，启动意图识别对话
             person_info = None
@@ -239,25 +274,70 @@ class DoorlockIntentHandler:
         device_id: str,
         conn=None
     ) -> Optional[bytes]:
-        """拍摄访客照片
+        """拍摄访客照片（通过MCP协议）
         
         Args:
             device_id: 设备ID
-            conn: 连接对象
+            conn: 连接对象（必须有mcp_client）
             
         Returns:
             JPEG图片数据，失败返回None
         """
         try:
-            # TODO: 调用ESP32拍照功能
-            # 这里需要通过MCP协议调用ESP32的capture_image工具
+            from core.providers.doorlock.esp32_camera import ESP32CameraService
+            
             logger.bind(tag=TAG).info(f"拍摄访客照片 - 设备: {device_id}")
             
-            # 暂时返回None，表示需要实现
-            return None
+            # 检查连接对象
+            if not conn:
+                logger.bind(tag=TAG).error(
+                    f"拍照失败：未提供连接对象 - 设备: {device_id}"
+                )
+                return None
+            
+            # 创建摄像头服务
+            # 注意：这里需要传入完整的config，从self获取或使用空字典
+            camera_config = {}
+            if hasattr(self, 'config'):
+                # 如果有config属性，使用它
+                camera_config = self.config
+            else:
+                # 否则尝试从其他组件获取
+                logger.bind(tag=TAG).warning(
+                    "DoorlockIntentHandler未找到config属性，使用默认配置"
+                )
+            
+            camera_service = ESP32CameraService(
+                config=camera_config,
+                logger_instance=logger
+            )
+            
+            # 调用拍照（通过MCP协议）
+            jpeg_data = await camera_service.capture_image(
+                device_id=device_id,
+                conn=conn,
+                question="访客到访拍照",
+                timeout=10
+            )
+            
+            if jpeg_data:
+                logger.bind(tag=TAG).info(
+                    f"拍照成功 - 设备: {device_id}, "
+                    f"大小: {len(jpeg_data)} bytes"
+                )
+                return jpeg_data
+            else:
+                logger.bind(tag=TAG).error(
+                    f"拍照失败 - 设备: {device_id}"
+                )
+                return None
             
         except Exception as e:
-            logger.bind(tag=TAG).error(f"拍摄访客照片失败: {e}")
+            logger.bind(tag=TAG).error(
+                f"拍摄访客照片异常 - 设备: {device_id}, 错误: {e}"
+            )
+            import traceback
+            logger.bind(tag=TAG).error(traceback.format_exc())
             return None
     
     async def start_intent_dialogue(
@@ -652,3 +732,69 @@ class DoorlockIntentHandler:
         except Exception as e:
             logger.bind(tag=TAG).error(f"保存访问记录异常: {e}")
             return 0
+
+    async def _send_face_result(
+        self,
+        conn,
+        result: str,
+        user_id: Optional[int],
+        access_granted: bool,
+        reason: str
+    ):
+        """下发人脸识别结果消息
+        
+        根据v5.2协议规范，face_result是服务器主动推送的识别结果：
+        - 不需要seq_id字段
+        - 不需要esp32_ack和ack两级确认
+        - ESP32根据access.granted字段决定是否开锁
+        - 开锁结果通过log_report上报
+        
+        Args:
+            conn: 连接对象
+            result: 识别结果 (known/unknown/no_face/error)
+            user_id: 用户ID（识别成功时有效）
+            access_granted: 是否授权开锁
+            reason: 授权/拒绝原因
+        """
+        try:
+            if not conn:
+                logger.bind(tag=TAG).warning("连接对象为空，无法发送face_result")
+                return
+            
+            # 构建face_result消息（符合v5.2协议）
+            face_result_msg = {
+                "type": "face_result",
+                "result": result,
+                "user_id": user_id,
+                "access": {
+                    "granted": access_granted,
+                    "reason": reason
+                }
+            }
+            
+            # 缓存识别结果（供开锁日志使用，30秒有效期）
+            import time
+            conn.last_face_result = {
+                "ts": int(time.time() * 1000),
+                "result": result,
+                "user_id": user_id,
+                "access_granted": access_granted,
+                "reason": reason
+            }
+            
+            # 发送消息
+            await conn.send_json(face_result_msg)
+            
+            logger.bind(tag=TAG).info(
+                f"已发送face_result - 设备: {conn.device_id}, "
+                f"result={result}, user_id={user_id}, "
+                f"granted={access_granted}, reason={reason}"
+            )
+            
+        except Exception as e:
+            logger.bind(tag=TAG).error(
+                f"发送face_result失败 - 设备: {conn.device_id if conn else 'unknown'}, "
+                f"错误: {e}"
+            )
+            import traceback
+            logger.bind(tag=TAG).error(traceback.format_exc())

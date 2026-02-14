@@ -19,10 +19,11 @@ class DoorlockConfig:
     """
     门锁设备配置数据类
     
-    存储每个设备的门锁AI功能配置，包括意图识别和看护模式的开关状态
+    存储每个设备的门锁AI功能配置，包括意图识别、人脸识别和看护模式的开关状态
     """
     device_id: str
     intent_recognition_enabled: bool = True
+    face_recognition_enabled: bool = True
     package_guard_available: bool = True
     package_guard_active: bool = False
     package_baseline_image: Optional[str] = None

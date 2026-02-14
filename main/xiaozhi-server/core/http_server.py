@@ -13,6 +13,8 @@ TAG = __name__
 
 
 class SimpleHttpServer:
+    _instance = None  # 单例实例
+    
     def __init__(self, config: dict):
         self.config = config
         self.logger = setup_logging()
@@ -20,11 +22,23 @@ class SimpleHttpServer:
         self.vision_handler = VisionHandler(config)
         self.image_upload_handler = ImageUploadHandler(config, self.logger)
         
+        # 保存单例
+        SimpleHttpServer._instance = self
+        
         # 门锁AI功能API处理器
         self.doorlock_config_handler = DoorlockConfigHandler(config)
         self.doorlock_guard_handler = DoorlockGuardHandler(config)
         self.doorlock_welcome_handler = DoorlockWelcomeHandler(config)
         self.doorlock_history_handler = DoorlockHistoryHandler(config)
+    
+    @classmethod
+    def get_instance(cls):
+        """获取HTTP服务器单例
+        
+        Returns:
+            SimpleHttpServer实例，如果未初始化则返回None
+        """
+        return cls._instance
 
     def _get_websocket_url(self, local_ip: str, port: int) -> str:
         """获取websocket地址

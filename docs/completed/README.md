@@ -4,12 +4,31 @@
 
 ## 目录结构
 
+### 📁 smart-doorlock-ai/
+
+智能门锁 AI 功能开发文档（已完成）：
+
+- `doorlock-vllm-loading-analysis.md` - 门锁 VLLM 加载分析
+- `doorlock-vllm-config-refactor.md` - 门锁 VLLM 配置重构
+- `doorlock-vllm-token-warning-analysis.md` - 门锁 VLLM Token 警告分析
+- `doorlock-token-monitoring-implementation.md` - 门锁 Token 监控实现
+- `qwen-vllm-config-recommendations.md` - Qwen VLLM 配置建议
+- `token-limit-enforcement-plan.md` - Token 限制执行计划
+- `token-limit-changes-summary.md` - Token 限制变更总结
+- `token-limit-full-implementation.md` - Token 限制完整实现
+- `token-limit-implementation-summary.md` - Token 限制实现总结
+- `token-monitoring-verification.md` - Token 监控验证
+- `image-token-estimation-explained.md` - 图片 Token 估算说明
+- `image-token-configurable.md` - 图片 Token 可配置化
+- `image-token-vga-adjustment.md` - 图片 Token VGA 调整
+
 ### 📁 face-recognition/
 
 人脸识别功能相关文档（已完成）：
 
 - `face-data-storage-documentation.md` - 人脸数据存储文档
 - `face-recognition-requirements.md` - 人脸识别功能需求文档
+- `face_recognition库api文档.md` - face_recognition 库 API 文档
 
 ### 📁 smart-doorlock/
 
@@ -38,6 +57,7 @@
 - `App协议升级说明-v2.2到v2.3.md`
 - `App协议与ESP32协议一致性分析报告.md`
 - `App协议v2.3代码实现验证报告-最终版.md`
+- `App协议v2.2代码修改计划.md`
 - `protocol-upgrade-verification-report.md`
 - `v5.2协议实现验证报告.md`
 
@@ -104,6 +124,8 @@ Bug 修复和功能改进文档：
 - `文件恢复报告.md` - 文件恢复报告
 - `任务3文件恢复报告.md` - 任务3文件恢复报告
 - `受影响文件最终报告.md` - 受影响文件最终报告
+- `esp32-auto-disconnect-analysis.md` - ESP32 自动断连分析
+- `connection-close-analysis.md` - 连接关闭分析
 
 ### 📁 task-summaries/
 
@@ -132,11 +154,7 @@ Bug 修复和功能改进文档：
 - `统一错误码修改完成报告.md` - 统一错误码修改完成报告
 - `统一错误码修改总结.md` - 统一错误码修改总结
 - `app-message-routing-verification.md` - App 消息路由验证报告
-
-### 📄 其他已完成文档
-
-- `App协议v2.2代码修改计划.md`
-- `face_recognition库api文档.md`
+- `上轮提交核心文件变更详情.md` - 上轮提交核心文件变更详情
 
 ## 归档历史
 
@@ -150,6 +168,8 @@ Bug 修复和功能改进文档：
 - **2026-02-12**: 第八次归档，整理已完成功能的文档（人脸识别、智能门锁基础功能）
 - **2026-02-13**: 第九次归档，整理智能门锁AI功能开发过程中的临时文件和验证报告
 - **2026-02-13**: 第十次归档，全面整理项目文件结构，归档文件恢复报告，整理测试和脚本目录
+- **2026-02-13**: 第十一次归档，整理智能门锁 AI Token 限制和 VLLM 配置相关文档
+- **2026-02-13**: 第十二次归档，整理 docs/completed 根目录下的未分类文档，更新 docs/my_docs/README.md
 
 ## 说明
 

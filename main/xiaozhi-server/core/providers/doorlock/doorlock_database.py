@@ -21,7 +21,7 @@ TAG = "DoorlockDatabase"
 
 
 def _load_doorlock_config() -> dict:
-    """加载智能门锁独立配置文件
+    """加载智能门锁独立配置文件（在系统配置加载完成后调用）
     
     Returns:
         dict: 门锁配置字典
@@ -42,7 +42,7 @@ def _load_doorlock_config() -> dict:
         yaml = YAML()
         with open(config_path, 'r', encoding='utf-8') as f:
             config = yaml.load(f)
-        logger.bind(tag=TAG).info(f"成功加载门锁独立配置文件")
+        logger.bind(tag=TAG).info(f"门锁独立配置加载成功（系统配置加载后）")
         return config
     except Exception as e:
         logger.bind(tag=TAG).error(f"加载门锁配置文件失败: {e}")
@@ -50,19 +50,26 @@ def _load_doorlock_config() -> dict:
 
 
 class DoorlockDatabase:
-    """门锁AI功能数据库操作类"""
+    """门锁AI功能数据库操作类
+    
+    注意：此类在系统配置加载完成后初始化，不影响系统配置加载流程
+    """
     
     def __init__(self, config: dict = None):
         """初始化数据库连接
         
         Args:
-            config: 系统配置字典（可选，仅用于兼容性，实际使用独立配置文件）
+            config: 系统配置字典（传入但不使用，门锁使用独立的数据库配置）
+        
+        说明：
+            - 门锁数据库配置从 doorlock_config.yaml 独立加载
+            - 不依赖系统配置，避免影响系统配置加载流程
         """
-        # 加载门锁独立配置文件
+        # 加载门锁独立配置文件（在系统配置加载完成后）
         doorlock_config = _load_doorlock_config()
         self.config = doorlock_config['mysql']
         
-        logger.bind(tag=TAG).info("使用门锁独立配置文件进行数据库连接")
+        logger.bind(tag=TAG).info("门锁数据库使用独立配置（不影响系统配置）")
         
         self.pool = None
         self._init_pool()

@@ -21,8 +21,8 @@ class SystemTextMessageHandler(TextMessageHandler):
         command = msg_json.get("command")
 
         if command == "start_monitor":
-            # 是否启用录像（默认不启用，避免性能影响）
-            enable_recording = msg_json.get("record", False)
+            # 是否启用录像（默认启用）
+            enable_recording = msg_json.get("record", True)
             await self._start_monitor(conn, enable_recording)
         elif command == "stop_monitor":
             await self._stop_monitor(conn)
@@ -30,12 +30,12 @@ class SystemTextMessageHandler(TextMessageHandler):
             conn.logger.bind(tag=TAG).warning(f"未知系统命令: {command}")
             await self._send_error(conn, f"未知命令: {command}")
 
-    async def _start_monitor(self, conn, enable_recording: bool = False):
+    async def _start_monitor(self, conn, enable_recording: bool = True):
         """启动监控模式
         
         Args:
             conn: 连接对象
-            enable_recording: 是否启用录像保存
+            enable_recording: 是否启用录像保存（默认启用）
         """
         try:
             # 判断连接类型并获取 ESP32 连接

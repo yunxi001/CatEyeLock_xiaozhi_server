@@ -17,14 +17,19 @@ class DoorlockGuardHandler:
     """门锁看护模式控制API处理器"""
 
     def __init__(self, config: dict):
-        """初始化处理器
+        """初始化处理器（在系统配置加载完成后调用）
         
         Args:
-            config: 系统配置字典
+            config: 系统配置字典（已从 manage-api 或本地加载完成）
+        
+        说明：
+            - 此类在 HTTP 服务器初始化时创建
+            - 系统配置已完全加载，可以安全使用
+            - 门锁配置在延迟初始化时加载，不影响系统启动
         """
         self.config = config
         
-        # 初始化数据库服务
+        # 初始化数据库服务（使用门锁独立配置）
         self.db = DoorlockDatabase(config)
         
         # 延迟初始化标志
@@ -32,7 +37,13 @@ class DoorlockGuardHandler:
         self._initialized = False
     
     def _ensure_initialized(self):
-        """确保看护管理器已初始化（延迟初始化）"""
+        """确保看护管理器已初始化（延迟初始化，首次 API 调用时触发）
+        
+        说明：
+            - 延迟初始化避免影响系统启动速度
+            - VLLM 提供者复用系统已加载的配置
+            - 门锁业务配置从独立文件加载
+        """
         if self._initialized:
             return
         
@@ -40,22 +51,14 @@ class DoorlockGuardHandler:
             # 初始化通知服务
             notification_service = NotificationService()
             
-            # 初始化VLLM提供者（复用系统配置）
+            # 初始化VLLM提供者（复用系统已加载的配置）
             vllm_provider = DoorlockVLLMProvider(self.config, logger)
             
             # 初始化TTS提供者（暂时为None，后续集成）
             tts_provider = None
             
-            # 加载门锁独立配置
-            doorlock_config_path = Path(__file__).parent.parent.parent / "config" / "doorlock_config.yaml"
-            doorlock_config = {}
-            if doorlock_config_path.exists():
-                try:
-                    yaml = YAML()
-                    with open(doorlock_config_path, 'r', encoding='utf-8') as f:
-                        doorlock_config = yaml.load(f)
-                except Exception as e:
-                    logger.error(f"加载门锁配置失败: {e}")
+            # 加载门锁独立配置（仅用于业务配置）
+            doorlock_config = self._load_doorlock_config()
             
             # 提取看护模式配置
             guard_config = doorlock_config.get("package_guard", {})
@@ -70,11 +73,34 @@ class DoorlockGuardHandler:
             )
             
             self._initialized = True
-            logger.info("门锁看护管理器延迟初始化成功")
+            logger.info("门锁看护管理器延迟初始化成功（复用系统 VLLM 配置）")
             
         except Exception as e:
             logger.error(f"门锁看护管理器初始化失败: {e}")
             raise
+    
+    def _load_doorlock_config(self) -> dict:
+        """加载门锁独立配置（仅用于业务配置）
+        
+        Returns:
+            门锁配置字典，加载失败返回空字典
+        """
+        try:
+            doorlock_config_path = Path(__file__).parent.parent.parent / "config" / "doorlock_config.yaml"
+            if not doorlock_config_path.exists():
+                logger.warning("门锁配置文件不存在，使用默认配置")
+                return {}
+            
+            from ruamel.yaml import YAML
+            yaml = YAML()
+            with open(doorlock_config_path, 'r', encoding='utf-8') as f:
+                config = yaml.load(f)
+            
+            logger.debug("门锁业务配置加载成功")
+            return config
+        except Exception as e:
+            logger.error(f"加载门锁配置失败: {e}，使用默认配置")
+            return {}
     
     @property
     def guard_manager(self):

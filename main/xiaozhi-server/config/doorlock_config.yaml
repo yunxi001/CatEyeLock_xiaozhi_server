@@ -1,6 +1,11 @@
 # 智能门锁AI功能独立配置文件
-# 此配置文件独立于系统主配置，不会被 manager-api 覆盖
-# 注意：VLLM 配置复用系统配置（config.yaml 的 selected_module.VLLM）
+# 
+# 配置说明：
+# 1. 此配置文件独立于系统主配置，不会被 manager-api 覆盖
+# 2. VLLM 模型配置完全复用系统配置（从 manage-api 或 config.yaml 加载）
+# 3. 此文件仅包含门锁业务配置（数据库、看护模式、性能参数等）
+# 4. 加载时机：在系统配置加载完成后，门锁模块初始化时加载
+# 5. 不影响系统配置加载流程
 
 # MySQL数据库配置
 mysql:
@@ -37,6 +42,38 @@ face_recognition:
 # 性能配置
 performance:
   # Token使用量警告阈值（0.0-1.0）
+  # 当输出Token使用率超过此阈值时触发警告
   max_token_usage_ratio: 0.8
+  
   # 会话清理延迟（秒）
   session_cleanup_delay: 0
+  
+  # VLLM模型Token限制（用于监控和警告）
+  # 注意：这些限制基于通义千问视觉模型（qwen3-vl-flash/plus）
+  vllm_limits:
+    # 模型上下文窗口大小（输入+输出的总限制）
+    model_context_limit: 262144  # 256K tokens
+    
+    # 最大输入Token数（提示词+对话历史+图片）
+    max_input_tokens: 260096  # 约254K tokens
+    
+    # 最大输出Token数（AI生成的回复）
+    max_output_tokens: 32768  # 32K tokens
+    
+    # 单张图片最大Token数
+    max_image_tokens: 16384  # 16K tokens
+    
+    # 单张图片Token估算值（用于输入Token计算）
+    # 注意：实际Token消耗取决于图片分辨率和内容复杂度
+    # - VGA (640×480): 约 6000-8000 tokens
+    # - HD (1280×720): 约 10000-12000 tokens
+    # - FHD (1920×1080): 约 14000-16000 tokens
+    tokens_per_image: 7000  # 当前图片为VGA分辨率
+    
+    # 输入Token警告阈值（0.0-1.0）
+    # 当输入Token超过 max_input_tokens * 此阈值时警告
+    input_warning_ratio: 0.8  # 80%
+    
+    # 总Token警告阈值（0.0-1.0）
+    # 当总Token超过 model_context_limit * 此阈值时警告
+    total_warning_ratio: 0.8  # 80%

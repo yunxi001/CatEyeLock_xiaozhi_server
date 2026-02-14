@@ -22,13 +22,16 @@ TAG = "DoorlockVLLM"
 
 
 class DoorlockVLLMProvider(VLLMProviderBase):
-    """门锁AI专用VLLM提供者"""
+    """门锁AI专用VLLM提供者
+    
+    复用系统已加载的 VLLM 配置，不独立配置模型参数
+    """
     
     def __init__(self, config: dict, logger_instance=None):
         """初始化VLLM提供者
         
         Args:
-            config: 系统配置字典
+            config: 系统配置字典（已从 manage-api 或本地加载完成）
             logger_instance: 日志实例（可选）
         """
         self.logger = logger_instance or logger
@@ -36,7 +39,7 @@ class DoorlockVLLMProvider(VLLMProviderBase):
         # 从系统配置获取选中的 VLLM 配置
         selected_vllm = config.get("selected_module", {}).get("VLLM", "")
         if not selected_vllm:
-            raise ValueError("系统未配置 VLLM 模块，请在 config.yaml 的 selected_module.VLLM 中指定")
+            raise ValueError("系统未配置 VLLM 模块，请在 selected_module.VLLM 中指定")
         
         vllm_configs = config.get("VLLM", {})
         if selected_vllm not in vllm_configs:
@@ -44,13 +47,13 @@ class DoorlockVLLMProvider(VLLMProviderBase):
         
         vllm_config = vllm_configs[selected_vllm]
         
-        # 提取 VLLM 配置参数（与 openai.py 保持一致）
+        # 提取 VLLM 配置参数（完全复用系统配置）
         self.model_name = vllm_config.get("model_name")
         self.api_key = vllm_config.get("api_key")
         # 兼容 base_url 和 url 两种写法
         self.base_url = vllm_config.get("base_url") or vllm_config.get("url")
         
-        # 参数配置（与 openai.py 保持一致的处理方式）
+        # 参数配置（完全复用系统配置的参数）
         param_defaults = {
             "max_tokens": (500, int),
             "temperature": (0.7, lambda x: round(float(x), 1)),
@@ -68,22 +71,24 @@ class DoorlockVLLMProvider(VLLMProviderBase):
             except (ValueError, TypeError):
                 setattr(self, param, default)
         
-        # Token使用量警告阈值（从门锁独立配置读取）
-        doorlock_config_path = Path(__file__).parent.parent.parent.parent / "config" / "doorlock_config.yaml"
-        doorlock_config = {}
-        if doorlock_config_path.exists():
-            try:
-                from ruamel.yaml import YAML
-                yaml = YAML()
-                with open(doorlock_config_path, 'r', encoding='utf-8') as f:
-                    doorlock_config = yaml.load(f)
-            except Exception as e:
-                self.logger.bind(tag=TAG).warning(f"加载门锁配置失败: {e}")
-        
+        # 从门锁独立配置加载性能参数和Token限制
+        doorlock_config = self._load_doorlock_config()
         performance_config = doorlock_config.get("performance", {})
+        
+        # Token使用量警告阈值（输出Token）
         self.max_token_usage_ratio = float(
             performance_config.get("max_token_usage_ratio", 0.8)
         )
+        
+        # VLLM模型Token限制（用于多层次监控）
+        vllm_limits = performance_config.get("vllm_limits", {})
+        self.model_context_limit = int(vllm_limits.get("model_context_limit", 262144))
+        self.max_input_tokens = int(vllm_limits.get("max_input_tokens", 260096))
+        self.max_output_tokens = int(vllm_limits.get("max_output_tokens", 32768))
+        self.max_image_tokens = int(vllm_limits.get("max_image_tokens", 16384))
+        self.tokens_per_image = int(vllm_limits.get("tokens_per_image", 7000))
+        self.input_warning_ratio = float(vllm_limits.get("input_warning_ratio", 0.8))
+        self.total_warning_ratio = float(vllm_limits.get("total_warning_ratio", 0.8))
         
         # 加载提示词配置
         self.prompts = self._load_prompts()
@@ -91,14 +96,39 @@ class DoorlockVLLMProvider(VLLMProviderBase):
         # 工具函数（延迟初始化）
         self.doorlock_tools = None
         
-        # 初始化OpenAI客户端（与 openai.py 保持一致）
+        # 初始化OpenAI客户端
         self.client = openai.OpenAI(api_key=self.api_key, base_url=self.base_url)
         
         self.logger.bind(tag=TAG).info(
-            f"门锁VLLM提供者初始化完成: 使用系统配置 {selected_vllm}, "
+            f"门锁VLLM提供者初始化完成: 复用系统配置 {selected_vllm}, "
             f"model={self.model_name}, max_tokens={self.max_tokens}, "
+            f"context_limit={self.model_context_limit}, "
+            f"tokens_per_image={self.tokens_per_image}, "
             f"prompts_loaded={len(self.prompts)}"
         )
+    
+    def _load_doorlock_config(self) -> dict:
+        """加载门锁独立配置文件（仅用于业务配置，不影响 VLLM 模型配置）
+        
+        Returns:
+            门锁配置字典，加载失败返回空字典
+        """
+        try:
+            doorlock_config_path = Path(__file__).parent.parent.parent.parent / "config" / "doorlock_config.yaml"
+            if not doorlock_config_path.exists():
+                self.logger.bind(tag=TAG).debug("门锁配置文件不存在，使用默认配置")
+                return {}
+            
+            from ruamel.yaml import YAML
+            yaml = YAML()
+            with open(doorlock_config_path, 'r', encoding='utf-8') as f:
+                config = yaml.load(f)
+            
+            self.logger.bind(tag=TAG).debug("门锁配置加载成功")
+            return config
+        except Exception as e:
+            self.logger.bind(tag=TAG).warning(f"加载门锁配置失败: {e}，使用默认配置")
+            return {}
     
     def set_doorlock_tools(self, doorlock_tools: DoorlockTools):
         """设置门锁工具函数
@@ -108,6 +138,150 @@ class DoorlockVLLMProvider(VLLMProviderBase):
         """
         self.doorlock_tools = doorlock_tools
         self.logger.bind(tag=TAG).info("门锁工具函数已设置")
+    
+    def _estimate_tokens(self, text: str) -> int:
+        """估算文本的Token数量（简化方法）
+        
+        Args:
+            text: 文本内容
+            
+        Returns:
+            估算的Token数量
+        
+        说明：
+            - 中文：约 1.5 字符/Token
+            - 英文：约 4 字符/Token
+            - 这是粗略估算，实际Token数由模型决定
+        """
+        if not text:
+            return 0
+        
+        # 统计中英文字符
+        chinese_chars = sum(1 for c in text if '\u4e00' <= c <= '\u9fff')
+        other_chars = len(text) - chinese_chars
+        
+        # 估算Token数
+        estimated_tokens = int(chinese_chars / 1.5 + other_chars / 4)
+        
+        return estimated_tokens
+    
+    def _estimate_image_tokens(self, image_count: int) -> int:
+        """估算图片的Token数量
+        
+        Args:
+            image_count: 图片数量
+            
+        Returns:
+            估算的Token数量
+        
+        说明：
+            - 从配置文件加载 tokens_per_image 参数
+            - 默认值：7000 tokens（VGA分辨率）
+            - 可根据实际图片分辨率调整配置
+        """
+        return image_count * self.tokens_per_image
+    
+    def _truncate_dialogue_history(
+        self,
+        dialogue_history: List[Dict[str, str]],
+        max_tokens: int
+    ) -> List[Dict[str, str]]:
+        """截断对话历史以满足Token限制
+        
+        Args:
+            dialogue_history: 完整对话历史
+            max_tokens: 最大Token数
+            
+        Returns:
+            截断后的对话历史（保留最近的对话）
+        """
+        if max_tokens <= 0:
+            return []
+        
+        # 从最新的对话开始累加
+        truncated = []
+        current_tokens = 0
+        
+        for msg in reversed(dialogue_history):
+            content = msg.get("content", "")
+            msg_tokens = self._estimate_tokens(content)
+            
+            if current_tokens + msg_tokens > max_tokens:
+                # 超出限制，停止添加
+                break
+            
+            truncated.insert(0, msg)
+            current_tokens += msg_tokens
+        
+        return truncated
+    
+    def _check_image_token_limit(self, image_count: int) -> bool:
+        """检查图片数量是否超过Token限制
+        
+        Args:
+            image_count: 图片数量
+            
+        Returns:
+            是否在限制内
+        """
+        estimated_tokens = self._estimate_image_tokens(image_count)
+        
+        if estimated_tokens > self.max_image_tokens:
+            self.logger.bind(tag=TAG).error(
+                f"❌ 图片Token超出限制: {estimated_tokens} > {self.max_image_tokens}, "
+                f"图片数量: {image_count}"
+            )
+            return False
+        
+        return True
+    
+    def _check_token_usage(self, token_usage: dict, response_time: float, tool_calls_count: int):
+        """多层次检查Token使用情况，提供详细的监控和警告
+        
+        Args:
+            token_usage: Token使用统计字典
+            response_time: 响应时间（秒）
+            tool_calls_count: 工具调用次数
+        """
+        prompt_tokens = token_usage["prompt_tokens"]
+        completion_tokens = token_usage["completion_tokens"]
+        total_tokens = token_usage["total_tokens"]
+        
+        # 计算各项使用率
+        output_usage_ratio = completion_tokens / self.max_tokens
+        input_usage_ratio = prompt_tokens / self.max_input_tokens
+        total_usage_ratio = total_tokens / self.model_context_limit
+        
+        # 1. 检查输出Token使用率（主要警告 - 影响回复完整性）
+        if output_usage_ratio > self.max_token_usage_ratio:
+            self.logger.bind(tag=TAG).warning(
+                f"⚠️ 输出Token接近限制: {completion_tokens}/{self.max_tokens} "
+                f"({output_usage_ratio:.1%})，AI回复可能被截断，建议增加 max_tokens"
+            )
+        
+        # 2. 检查输入Token使用率（次要警告 - 影响上下文容量）
+        if input_usage_ratio > self.input_warning_ratio:
+            self.logger.bind(tag=TAG).warning(
+                f"⚠️ 输入Token较高: {prompt_tokens}/{self.max_input_tokens} "
+                f"({input_usage_ratio:.1%})，建议优化提示词、减少对话历史或降低图片分辨率"
+            )
+        
+        # 3. 检查总Token使用率（严重警告 - 接近模型上限）
+        if total_usage_ratio > self.total_warning_ratio:
+            self.logger.bind(tag=TAG).warning(
+                f"⚠️ 总Token接近上下文窗口: {total_tokens}/{self.model_context_limit} "
+                f"({total_usage_ratio:.1%})，接近模型上限，可能影响性能"
+            )
+        
+        # 4. 记录详细统计（信息级别 - 用于监控和分析）
+        self.logger.bind(tag=TAG).info(
+            f"VLLM调用统计 | "
+            f"输入: {prompt_tokens} ({input_usage_ratio:.1%}) | "
+            f"输出: {completion_tokens} ({output_usage_ratio:.1%}) | "
+            f"总计: {total_tokens} ({total_usage_ratio:.1%}) | "
+            f"响应时间: {response_time:.2f}s | "
+            f"工具调用: {tool_calls_count}"
+        )
     
     def _load_prompts(self) -> Dict[str, str]:
         """从配置文件加载提示词
@@ -200,6 +374,9 @@ class DoorlockVLLMProvider(VLLMProviderBase):
             if self.doorlock_tools:
                 tools = DoorlockTools.get_tools_schema()
             
+            # 应用输出Token限制（使用门锁配置的限制，不超过系统配置）
+            max_tokens = min(self.max_tokens, self.max_output_tokens)
+            
             # 调用VLLM
             response = self.client.chat.completions.create(
                 model=self.model_name,
@@ -207,7 +384,7 @@ class DoorlockVLLMProvider(VLLMProviderBase):
                 tools=tools if tools else None,
                 temperature=self.temperature,
                 top_p=self.top_p,
-                max_tokens=self.max_tokens,
+                max_tokens=max_tokens,
                 stream=False
             )
             
@@ -236,21 +413,8 @@ class DoorlockVLLMProvider(VLLMProviderBase):
                 "total_tokens": response.usage.total_tokens
             }
             
-            # Token使用量警告
-            usage_ratio = token_usage["total_tokens"] / self.max_tokens
-            if usage_ratio > self.max_token_usage_ratio:
-                self.logger.bind(tag=TAG).warning(
-                    f"Token使用量已达 {token_usage['total_tokens']}/{self.max_tokens} "
-                    f"({usage_ratio:.1%})，接近上限"
-                )
-            
-            self.logger.bind(tag=TAG).info(
-                f"VLLM调用统计 | 输入Token: {token_usage['prompt_tokens']} | "
-                f"输出Token: {token_usage['completion_tokens']} | "
-                f"总Token: {token_usage['total_tokens']} | "
-                f"响应时间: {response_time:.2f}s | "
-                f"工具调用: {len(tool_calls)}"
-            )
+            # 多层次Token使用量检查和警告
+            self._check_token_usage(token_usage, response_time, len(tool_calls))
             
             return {
                 "content": content,
@@ -280,6 +444,12 @@ class DoorlockVLLMProvider(VLLMProviderBase):
             分析结果
         """
         self.logger.bind(tag=TAG).debug("执行意图识别分析")
+        
+        # 检查图片Token限制（1张图片）
+        if not self._check_image_token_limit(1):
+            error_msg = f"图片Token超出限制: 1张图片估算 {self._estimate_image_tokens(1)} tokens > {self.max_image_tokens}"
+            self.logger.bind(tag=TAG).error(error_msg)
+            raise ValueError(error_msg)
         
         # 如果没有提供提示词，从配置加载
         if not system_prompt:
@@ -311,6 +481,12 @@ class DoorlockVLLMProvider(VLLMProviderBase):
             分析结果
         """
         self.logger.bind(tag=TAG).debug("执行看护监控分析")
+        
+        # 检查图片Token限制（2张图片）
+        if not self._check_image_token_limit(2):
+            error_msg = f"图片Token超出限制: 2张图片估算 {self._estimate_image_tokens(2)} tokens > {self.max_image_tokens}"
+            self.logger.bind(tag=TAG).error(error_msg)
+            raise ValueError(error_msg)
         
         # 如果没有提供提示词，从配置加载
         if not system_prompt:
@@ -387,7 +563,7 @@ class DoorlockVLLMProvider(VLLMProviderBase):
         dialogue_history: List[Dict[str, str]],
         system_prompt: Optional[str] = None
     ) -> List[Dict[str, Any]]:
-        """构建消息列表
+        """构建消息列表（带Token限制）
         
         Args:
             question: 问题文本
@@ -398,6 +574,52 @@ class DoorlockVLLMProvider(VLLMProviderBase):
         Returns:
             消息列表
         """
+        # 估算各部分Token数
+        system_tokens = self._estimate_tokens(system_prompt) if system_prompt else 0
+        question_tokens = self._estimate_tokens(question)
+        image_tokens = self._estimate_image_tokens(len(images))
+        
+        # 计算固定部分Token数
+        fixed_tokens = system_tokens + question_tokens + image_tokens
+        
+        # 计算对话历史可用Token数（综合考虑输入限制和总限制）
+        # 方案1：基于输入限制
+        available_by_input = self.max_input_tokens - fixed_tokens - self.max_tokens
+        
+        # 方案2：基于总限制（模型上下文窗口）
+        available_by_total = self.model_context_limit - fixed_tokens - self.max_tokens
+        
+        # 取两者的最小值，确保不超过任何一个限制
+        available_for_history = min(available_by_input, available_by_total)
+        
+        if available_for_history < 0:
+            self.logger.bind(tag=TAG).warning(
+                f"⚠️ 固定内容已超出限制: "
+                f"system={system_tokens}, question={question_tokens}, "
+                f"images={image_tokens}, total_fixed={fixed_tokens}, "
+                f"max_input={self.max_input_tokens}, "
+                f"context_limit={self.model_context_limit}, "
+                f"reserved_output={self.max_tokens}"
+            )
+            # 如果固定内容已超限，清空对话历史
+            dialogue_history = []
+            available_for_history = 0
+        
+        # 截断对话历史
+        truncated_history = self._truncate_dialogue_history(
+            dialogue_history,
+            max_tokens=available_for_history
+        )
+        
+        if len(truncated_history) < len(dialogue_history):
+            # 计算实际使用的限制类型
+            limit_type = "输入限制" if available_by_input < available_by_total else "总限制"
+            self.logger.bind(tag=TAG).info(
+                f"对话历史已截断: {len(dialogue_history)} -> {len(truncated_history)} 轮, "
+                f"可用Token: {available_for_history} (受限于{limit_type})"
+            )
+        
+        # 构建消息
         messages = []
         
         # 添加系统提示词
@@ -407,8 +629,8 @@ class DoorlockVLLMProvider(VLLMProviderBase):
                 "content": system_prompt
             })
         
-        # 添加对话历史
-        for msg in dialogue_history:
+        # 添加截断后的对话历史
+        for msg in truncated_history:
             messages.append({
                 "role": msg.get("role", "user"),
                 "content": msg.get("content", "")

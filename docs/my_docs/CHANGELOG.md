@@ -7274,3 +7274,554 @@ python test_doorlock_integration.py
 ```
 
 测试输出包含详细的通过/失败信息和统计报告，便于快速定位问题。
+
+---
+
+## 2026-02-13
+
+### 门锁 VLLM 提供者代码重构
+
+#### 修改文件
+
+- `main/xiaozhi-server/core/providers/vllm/doorlock_vllm.py`
+
+#### 修改位置
+
+1. **类文档字符串优化**（第 25-28 行）
+   - 扩展类文档注释，明确说明"复用系统已加载的 VLLM 配置，不独立配置模型参数"
+
+2. **`__init__` 方法重构**（第 30-96 行）
+   - 优化参数文档注释，说明 config 参数为"系统配置字典（已从 manage-api 或本地加载完成）"
+   - 将门锁配置加载逻辑重构为独立方法 `_load_doorlock_config()`
+   - 简化 Token 使用量警告阈值的初始化逻辑
+   - 优化日志输出，将"使用系统配置"改为"复用系统配置"
+
+3. **新增 `_load_doorlock_config` 方法**（第 98-114 行）
+   - 提取门锁独立配置文件加载逻辑为独立方法
+   - 增强错误处理：配置文件不存在时返回空字典而非抛出异常
+   - 添加详细的日志记录（debug 级别）
+   - 方法文档注释明确说明"仅用于业务配置，不影响 VLLM 模型配置"
+
+#### 变更内容
+
+**代码重构**：
+
+- 将 `__init__` 方法中的门锁配置加载逻辑（约 15 行代码）提取为独立方法 `_load_doorlock_config()`
+- 优化代码结构，提高可读性和可维护性
+- 分离关注点：VLLM 模型配置完全复用系统配置，门锁业务配置独立加载
+
+**错误处理增强**：
+
+- 配置文件不存在时不再抛出异常，而是返回空字典并使用默认值
+- 配置加载失败时记录 warning 日志并返回空字典
+- 提高代码健壮性，避免因配置文件缺失导致初始化失败
+
+**日志优化**：
+
+- 新增 debug 级别日志记录配置加载状态
+- 优化初始化完成日志，明确说明"复用系统配置"
+- 提升调试和问题排查能力
+
+#### 功能说明
+
+此次变更为代码重构，不改变功能行为。主要目的是：
+
+1. 提升代码可读性和可维护性
+2. 明确配置加载的职责分离（VLLM 模型配置 vs 门锁业务配置）
+3. 增强错误处理和日志记录
+4. 为后续扩展和维护提供更好的代码基础
+
+#### 技术特性
+
+- 遵循单一职责原则（SRP）
+- 改进错误处理策略（优雅降级）
+- 增强日志可观测性
+- 保持向后兼容性
+
+---
+
+## 2026-02-13 (更新)
+
+### 过滤 face_recognition_models 弃用警告
+
+#### 修改文件
+
+- `main/xiaozhi-server/app.py`
+
+#### 修改位置
+
+1. **导入区域**（第 5 行）
+   - 新增 `import warnings` 导入语句
+
+2. **警告过滤配置**（第 14-15 行）
+   - 在日志初始化之前添加警告过滤器
+   - 过滤 `face_recognition_models` 模块的 `UserWarning` 类型警告
+
+#### 变更内容
+
+```python
+# 过滤 pkg_resources 弃用警告（来自 face_recognition_models）
+warnings.filterwarnings("ignore", category=UserWarning, module="face_recognition_models")
+```
+
+#### 功能说明
+
+解决系统启动时 `face_recognition_models` 库产生的 `pkg_resources` 弃用警告问题。该警告来自第三方库内部使用已弃用的 `pkg_resources` API，不影响功能正常运行。通过添加警告过滤器，在系统启动时屏蔽此类警告信息，保持日志输出的清洁性，避免干扰重要日志信息的查看。
+
+#### 技术细节
+
+- 警告类型：`UserWarning`
+- 来源模块：`face_recognition_models`
+- 根本原因：第三方库使用已弃用的 `pkg_resources` API（应迁移至 `importlib.resources`）
+- 影响范围：仅过滤特定模块的警告，不影响其他警告的正常显示
+- 时机：在日志系统初始化之前配置，确保启动过程中不显示该警告
+
+#### 相关背景
+
+`pkg_resources` 是 `setuptools` 提供的资源访问 API，Python 3.9+ 推荐使用 `importlib.resources` 替代。`face_recognition_models` 库尚未完成迁移，导致在新版本 Python 中产生弃用警告。此修改为临时解决方案，待上游库更新后可移除此过滤器。
+
+---
+
+## 2026-02-13
+
+### 门锁 VLLM Token 限制配置增强
+
+#### 修改文件
+
+- `main/xiaozhi-server/core/providers/vllm/doorlock_vllm.py`
+
+#### 修改位置
+
+- `DoorlockVLLMProvider` 类的 `__init__` 方法（第 74-100 行）
+
+#### 变更内容
+
+1. **新增 VLLM 模型 Token 限制配置加载**：
+   - 从 `doorlock_config.yaml` 的 `performance.vllm_limits` 段读取配置
+   - 新增 6 个 Token 限制属性：
+     - `model_context_limit`: 模型上下文窗口大小（默认 262144，256K）
+     - `max_input_tokens`: 最大输入 Token 数（默认 260096）
+     - `max_output_tokens`: 最大输出 Token 数（默认 32768，32K）
+     - `max_image_tokens`: 单图片最大 Token 数（默认 16384，16K）
+     - `input_warning_ratio`: 输入 Token 警告阈值（默认 0.8）
+     - `total_warning_ratio`: 总 Token 警告阈值（默认 0.8）
+
+2. **优化配置加载逻辑**：
+   - 统一从 `doorlock_config` 提取 `performance_config`
+   - 简化代码结构，移除冗余的条件判断
+
+3. **增强初始化日志**：
+   - 新增 `context_limit` 参数输出
+   - 便于调试和确认配置加载情况
+
+#### 功能说明
+
+为门锁 VLLM 提供者增加多层次 Token 监控能力。通过从配置文件读取模型的真实 Token 限制（上下文窗口、最大输入/输出、图片 Token 等），为后续实现精确的 Token 使用量警告机制提供基础数据。
+
+**配置示例**：
+
+```yaml
+# config/doorlock_config.yaml
+performance:
+  # Token使用量警告阈值（输出Token）
+  max_token_usage_ratio: 0.8
+
+  # VLLM模型Token限制（用于多层次监控）
+  vllm_limits:
+    model_context_limit: 262144 # 256K 上下文窗口
+    max_input_tokens: 260096 # 最大输入限制
+    max_output_tokens: 32768 # 32K 最大输出
+    max_image_tokens: 16384 # 16K 单图片Token
+    input_warning_ratio: 0.8 # 输入达到 80% 时警告
+    total_warning_ratio: 0.8 # 总Token达到 80% 时警告
+```
+
+**后续计划**：
+
+- 实现 `_check_token_usage()` 方法，提供多层次 Token 监控
+- 监控输出 Token 使用率（主要警告）
+- 监控输入 Token 使用率（优化提示）
+- 监控总 Token 使用率（接近上下文窗口警告）
+
+#### 相关文档
+
+- [门锁 VLLM Token 警告机制分析](./doorlock-vllm-token-warning-analysis.md)
+- [通义千问 VLLM 配置建议](./qwen-vllm-config-recommendations.md)
+- [门锁 VLLM 配置重构文档](./doorlock-vllm-config-refactor.md)
+
+---
+
+## 2026-02-13 (更新 2)
+
+### 门锁 VLLM 输出 Token 限制强制执行
+
+#### 修改文件
+
+- `main/xiaozhi-server/core/providers/vllm/doorlock_vllm.py`
+
+#### 修改位置
+
+- `DoorlockVLLMProvider` 类的 `analyze_with_tools` 方法（第 278-288 行）
+
+#### 变更内容
+
+1. **新增输出 Token 限制计算**：
+   - 在调用 VLLM API 前，新增 `max_tokens = min(self.max_tokens, self.max_output_tokens)` 计算
+   - 取系统配置的 `max_tokens` 和门锁配置的 `max_output_tokens` 中的较小值
+
+2. **应用限制到 API 调用**：
+   - 将 `client.chat.completions.create()` 的 `max_tokens` 参数从 `self.max_tokens` 改为计算后的 `max_tokens`
+   - 确保实际调用时不超过配置的输出限制
+
+#### 功能说明
+
+实现 Token 限制强制执行方案的**阶段 1：输出 Token 限制**（最简单，优先实施）。通过在 API 调用前应用门锁配置的输出 Token 限制，防止 AI 回复过长导致被截断或超出预算。
+
+**工作原理**：
+
+```python
+# 系统配置（config.yaml）
+self.max_tokens = 500  # 系统默认输出限制
+
+# 门锁配置（doorlock_config.yaml）
+self.max_output_tokens = 32768  # 模型支持的最大输出（32K）
+
+# 实际使用（取较小值）
+max_tokens = min(500, 32768) = 500  # 使用系统配置的限制
+```
+
+**优势**：
+
+- ✅ 实现简单，只需修改一行代码
+- ✅ 直接限制模型输出，防止回复被截断
+- ✅ 不影响输入内容
+- ✅ 与现有配置体系兼容
+
+**配置示例**：
+
+```yaml
+# config.yaml（系统配置）
+VLLM:
+  ChatGLMVLLM:
+    max_tokens: 3000 # 用户预设的输出限制
+
+# config/doorlock_config.yaml（门锁配置）
+performance:
+  vllm_limits:
+    max_output_tokens: 32768 # 模型支持的最大输出
+```
+
+**实际效果**：
+
+- 当前配置下：`max_tokens = min(3000, 32768) = 3000`
+- 实际调用时使用 3000 作为输出限制
+- 如果用户将系统配置改为 5000，则使用 5000
+- 如果用户将系统配置改为 40000（超过模型上限），则使用 32768
+
+#### 后续计划
+
+- **阶段 2**：实现输入 Token 限制（截断对话历史）
+- **阶段 3**：实现图片 Token 限制（限制图片数量/分辨率）
+- **阶段 4**：实现总 Token 限制（综合控制输入+输出）
+
+#### 相关文档
+
+- [Token 限制强制执行实施方案](./token-limit-enforcement-plan.md)
+- [Token 监控机制验证报告](./token-monitoring-verification.md)
+- [门锁 VLLM Token 监控实现文档](./doorlock-token-monitoring-implementation.md)
+
+---
+
+## 2026-02-13 (更新 3)
+
+### 门锁 VLLM 图片 Token 限制检查方法实现
+
+#### 修改文件
+
+- `main/xiaozhi-server/core/providers/vllm/doorlock_vllm.py`
+
+#### 修改位置
+
+- `DoorlockVLLMProvider` 类中，在 `_truncate_dialogue_history` 方法之后（第 215-233 行）
+
+#### 变更内容
+
+- 新增 `_check_image_token_limit` 方法：检查图片数量是否超过 Token 限制
+- 方法功能：
+  - 调用 `_estimate_image_tokens()` 估算图片总 Token 数
+  - 与配置的 `max_image_tokens` 限制进行比较
+  - 超出限制时记录错误日志并返回 `False`
+  - 在限制内返回 `True`
+
+#### 功能说明
+
+实现 Token 限制强制执行方案的**阶段 3：图片 Token 限制**的基础方法。此方法用于在处理图片前验证图片数量是否会导致 Token 超限，为后续在 `analyze_package_status` 等方法中调用提供支持。
+
+**工作原理**：
+
+```python
+# 估算图片 Token 数（每张约 12000 Token）
+estimated_tokens = image_count * 12000
+
+# 与配置限制比较
+if estimated_tokens > self.max_image_tokens:  # 默认 16384
+    logger.error("图片Token超出限制")
+    return False
+
+return True
+```
+
+**使用场景**：
+
+- 看护监控场景（双图片对比）：`_check_image_token_limit(2)`
+- 意图识别场景（单图片）：`_check_image_token_limit(1)`
+- 防止图片过多导致 Token 超限
+
+**配置示例**：
+
+```yaml
+# config/doorlock_config.yaml
+performance:
+  vllm_limits:
+    max_image_tokens: 16384 # 16K tokens（约1-2张高分辨率图片）
+```
+
+**实际效果**：
+
+- 单图片场景：12000 < 16384 ✅ 通过
+- 双图片场景：24000 > 16384 ❌ 超限（需要降低分辨率或调整配置）
+
+#### 后续集成
+
+此方法将在以下场景中调用：
+
+1. `analyze_package_status` 方法：看护监控分析前检查双图片
+2. `analyze_intent` 方法：意图识别分析前检查单图片
+3. 其他需要图片 Token 验证的场景
+
+#### 相关文档
+
+- [Token 限制强制执行实施方案](./token-limit-enforcement-plan.md) - 阶段 3 详细说明
+- [Token 限制实施总结](./token-limit-implementation-summary.md)
+- [通义千问 VLLM 配置建议](./qwen-vllm-config-recommendations.md) - 图片 Token 优化建议
+
+---
+
+## 2026-02-13 (更新 4)
+
+### 门锁 VLLM Token 限制策略优化
+
+#### 修改文件
+
+- `main/xiaozhi-server/core/providers/vllm/doorlock_vllm.py`
+
+#### 修改位置
+
+- `DoorlockVLLMProvider` 类的 `_build_messages` 方法（第 582-609 行）
+
+#### 变更内容
+
+**1. Token 限制计算策略优化**：
+
+- **修改前**：仅基于输入 Token 限制计算对话历史可用空间
+
+  ```python
+  available_for_history = self.max_input_tokens - fixed_tokens - self.max_tokens
+  ```
+
+- **修改后**：综合考虑输入限制和模型上下文窗口限制
+
+  ```python
+  # 方案1：基于输入限制
+  available_by_input = self.max_input_tokens - fixed_tokens - self.max_tokens
+
+  # 方案2：基于总限制（模型上下文窗口）
+  available_by_total = self.model_context_limit - fixed_tokens - self.max_tokens
+
+  # 取两者的最小值，确保不超过任何一个限制
+  available_for_history = min(available_by_input, available_by_total)
+  ```
+
+**2. 日志信息增强**：
+
+- **警告日志优化**：
+  - 新增 `total_fixed` 字段：显示固定内容总 Token 数
+  - 新增 `context_limit` 字段：显示模型上下文窗口大小
+  - 调整日志文本：从"超出输入限制"改为"超出限制"（更通用）
+
+- **截断日志优化**：
+  - 新增限制类型判断：`limit_type = "输入限制" if available_by_input < available_by_total else "总限制"`
+  - 在日志中显示实际受限类型：`可用Token: {available_for_history} (受限于{limit_type})`
+
+#### 功能说明
+
+实现更严格的 Token 限制策略，确保对话历史截断时同时满足以下两个限制：
+
+1. **输入 Token 限制**（`max_input_tokens`）：防止输入部分超过模型输入上限
+2. **模型上下文窗口限制**（`model_context_limit`）：防止输入+输出总和超过模型上下文窗口
+
+**优势**：
+
+- ✅ 双重保护：同时检查输入限制和总限制，取更严格的一个
+- ✅ 防止 API 调用失败：避免因超过任一限制导致请求被拒绝
+- ✅ 更清晰的日志：明确显示受哪个限制约束，便于调优配置
+
+**实际场景示例**：
+
+```
+场景 1：受输入限制约束
+  固定内容：50,000 tokens
+  输入限制：260,096 tokens
+  总限制：262,144 tokens
+  预留输出：3,000 tokens
+
+  可用（输入）：260,096 - 50,000 - 3,000 = 207,096 tokens
+  可用（总计）：262,144 - 50,000 - 3,000 = 209,144 tokens
+
+  实际可用：min(207,096, 209,144) = 207,096 tokens
+  受限类型：输入限制
+
+场景 2：受总限制约束（极端情况）
+  固定内容：250,000 tokens（大量图片）
+  输入限制：260,096 tokens
+  总限制：262,144 tokens
+  预留输出：3,000 tokens
+
+  可用（输入）：260,096 - 250,000 - 3,000 = 7,096 tokens
+  可用（总计）：262,144 - 250,000 - 3,000 = 9,144 tokens
+
+  实际可用：min(7,096, 9,144) = 7,096 tokens
+  受限类型：输入限制（仍然是输入限制更严格）
+```
+
+#### 配置参数
+
+```yaml
+# config/doorlock_config.yaml
+performance:
+  vllm_limits:
+    model_context_limit: 262144 # 256K tokens（模型上下文窗口）
+    max_input_tokens: 260096 # 254K tokens（输入限制）
+    max_output_tokens: 32768 # 32K tokens（输出限制）
+```
+
+#### 相关文档
+
+- [Token 限制强制执行实施方案](./token-limit-enforcement-plan.md) - 阶段 4：总 Token 限制
+- [Token 限制实施总结](./token-limit-implementation-summary.md)
+- [通义千问 VLLM 配置建议](./qwen-vllm-config-recommendations.md)
+
+---
+
+## 2026-02-13
+
+### 优化图片 Token 估算算法
+
+#### 修改文件
+
+- `main/xiaozhi-server/core/providers/vllm/doorlock_vllm.py`
+
+#### 修改位置
+
+- `DoorlockVLLMProvider` 类的 `_estimate_image_tokens` 方法（第 172-179 行）
+
+#### 变更内容
+
+- 调整图片 Token 估算值：从每张 12000 Token 降低到 7000 Token
+- 更新方法文档注释，明确说明当前图片为 VGA 分辨率（640×480）
+- 补充说明 VGA 图片实际约占用 6000-8000 Token
+
+#### 功能说明
+
+根据实际使用的 VGA 分辨率（640×480）图片调整 Token 估算算法，使估算更贴近真实消耗。之前的 12000 Token 估算值偏高（基于 HD 分辨率），导致对话历史被过度截断。调整后：
+
+- **意图识别场景**（1张图片）：估算从 12000 降到 7000，节省 5000 Token 空间
+- **看护监控场景**（2张图片）：估算从 24000 降到 14000，节省 10000 Token 空间
+- 为对话历史预留更多 Token，减少不必要的截断
+- 提高 Token 限制检查的准确性
+
+#### 相关文档
+
+- [图片 Token 估算详解](./image-token-estimation-explained.md)
+- [Token 限制完整实施报告](./token-limit-full-implementation.md)
+
+---
+
+## 2026-02-13
+
+### 门锁 VLLM 图片 Token 估算值配置化
+
+#### 修改文件
+
+- `main/xiaozhi-server/core/providers/vllm/doorlock_vllm.py`
+
+#### 修改位置
+
+- `DoorlockVLLMProvider` 类的 `__init__` 方法（第 89 行）
+
+#### 变更内容
+
+- 新增配置加载：`self.tokens_per_image = int(vllm_limits.get("tokens_per_image", 7000))`
+- 从 `doorlock_config.yaml` 的 `vllm_limits.tokens_per_image` 读取单张图片 Token 估算值
+- 默认值设置为 7000（对应 VGA 分辨率）
+
+#### 功能说明
+
+将图片 Token 估算值从硬编码改为配置化管理。支持根据实际图片分辨率灵活调整估算值：
+
+- VGA (640×480): 7000 tokens（当前默认）
+- HD (1280×720): 11000 tokens
+- FHD (1920×1080): 15000 tokens
+
+配合 `doorlock_config.yaml` 中的 `tokens_per_image` 配置项，可以在不修改代码的情况下调整图片 Token 估算策略，提高系统的灵活性和可维护性。
+
+#### 相关文档
+
+- [图片 Token VGA 调整说明](./image-token-vga-adjustment.md)
+- [图片 Token 估算详解](./image-token-estimation-explained.md)
+- [Token 限制完整实施报告](./token-limit-full-implementation.md)
+
+---
+
+## 2026-02-13
+
+### 监控模式录像功能默认启用
+
+#### 修改文件
+
+- `main/xiaozhi-server/core/handle/textHandler/systemMessageHandler.py`
+
+#### 修改位置
+
+- `SystemTextMessageHandler` 类的 `handle` 方法（第 23-25 行）
+- `SystemTextMessageHandler` 类的 `_start_monitor` 方法签名（第 33 行）
+
+#### 变更内容
+
+1. **`handle` 方法**：
+   - 修改 `enable_recording` 默认值：从 `msg_json.get("record", False)` 改为 `msg_json.get("record", True)`
+   - 更新注释：从"默认不启用，避免性能影响"改为"默认启用"
+
+2. **`_start_monitor` 方法**：
+   - 修改参数默认值：从 `enable_recording: bool = False` 改为 `enable_recording: bool = True`
+   - 更新文档注释：从"是否启用录像保存"改为"是否启用录像保存（默认启用）"
+
+#### 功能说明
+
+将监控模式的录像功能从"默认不启用"改为"默认启用"。当用户或 App 发送 `start_monitor` 命令启动监控模式时，系统会自动开始录像，除非明确指定 `record: false`。
+
+**变更原因**：
+
+- 监控模式的主要用途是记录门口活动，录像是核心功能
+- 用户期望启动监控时自动录像，而不是需要额外配置
+- 简化 API 使用，提升用户体验
+
+**影响**：
+
+- 启动监控时会自动调用 `VideoRecorder.start_recording()`
+- 停止监控时会自动调用 `VideoRecorder.stop_recording()` 并触发后台视频合成
+- 如需禁用录像，可在请求中明确指定 `{"command": "start_monitor", "record": false}`
+
+#### 相关文档
+
+- [智能门锁系统-服务器与ESP32通信协议规范-v5.0](./智能猫眼门锁系统-服务器与ESP32通信协议规范-v5.0.md)

@@ -58,7 +58,8 @@ log:
 # 使用完声音文件后删除文件(Delete the sound file when you are done using it)
 delete_audio: true
 # 没有语音输入多久后断开连接(秒)，默认2分钟，即120秒
-close_connection_no_voice_time: 120
+# 设置为超大值以禁用自动断开功能
+close_connection_no_voice_time: 999999
 # TTS请求超时时间(秒)
 tts_timeout: 10
 # 开启唤醒词加速
@@ -192,7 +193,7 @@ prompt_template: agent-base-prompt.txt
 
 # 结束语prompt
 end_prompt:
-  enable: true # 是否开启结束语
+  enable: false # 是否开启结束语（已禁用自动断开功能）
   # 结束语
   prompt: |
     请你以"时间过得真快"未来头，用富有感情、依依不舍的话来结束这场对话吧！
@@ -615,19 +616,6 @@ VLLM:
     model_name: glm-4v-flash  # 智谱AI的视觉模型
     url: https://open.bigmodel.cn/api/paas/v4/
     api_key: 你的api_key
-  DoorlockVLLM:
-    # 门锁AI专用VLLM配置，支持工具函数调用
-    type: doorlock_vllm
-    # 使用支持工具调用的视觉模型，如glm-4v、qwen-vl-plus等
-    model_name: glm-4v-flash
-    base_url: https://open.bigmodel.cn/api/paas/v4/
-    api_key: 你的api_key
-    # VLLM参数配置
-    max_tokens: 500
-    temperature: 0.7
-    top_p: 1.0
-    # Token使用量警告阈值（0.0-1.0）
-    max_token_usage_ratio: 0.8
   QwenVLVLLM:
     type: openai
     model_name: qwen2.5-vl-3b-instruct
@@ -1019,36 +1007,3 @@ TTS:
     # speed: 50  # 语速：0-100
     # pitch: 50  # 语调：0-100
 
-
-# ################################智能门锁AI功能配置######################################
-# 智能门锁AI功能配置，包括快递看护模式和访客意图识别
-doorlock:
-  # 快递看护模式配置
-  package_guard:
-    # 拍照间隔（秒）
-    photo_interval: 5
-    # 基准图片存储目录
-    baseline_dir: "data/face_recognition/package_baseline/"
-    # 警报照片存储目录
-    alert_photo_dir: "data/face_recognition/doorlock_photos/"
-  
-  # 意图识别配置
-  intent_recognition:
-    # 对话超时时间（秒），访客沉默超过此时间则结束对话
-    dialogue_timeout: 30
-    # 最大对话轮次，超过此轮次自动清理最早的对话
-    max_dialogue_rounds: 10
-  
-  # 人脸识别配置
-  face_recognition:
-    # 最大重试次数
-    max_retries: 3
-    # 重试间隔（秒）
-    retry_interval: 1
-  
-  # 性能配置
-  performance:
-    # Token使用量警告阈值（0.0-1.0），超过此比例输出警告
-    max_token_usage_ratio: 0.8
-    # 会话清理延迟（秒），会话结束后延迟清理
-    session_cleanup_delay: 0

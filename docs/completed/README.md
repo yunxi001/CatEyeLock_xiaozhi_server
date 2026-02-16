@@ -21,6 +21,16 @@
 - `image-token-estimation-explained.md` - 图片 Token 估算说明
 - `image-token-configurable.md` - 图片 Token 可配置化
 - `image-token-vga-adjustment.md` - 图片 Token VGA 调整
+- `doorlock-vllm-two-modes-flow.md` - 门锁 VLLM 两种模式流程分析
+- `integration-test-summary.md` - 集成测试总结
+- `vllm-implementation-analysis.md` - VLLM 实现分析
+- `photo-capture-task-implementation.md` - 照片捕获任务实现
+- `vllm-intent-simulation-test-plan.md` - VLLM 意图模拟测试计划
+- `vllm-modes-merge-analysis.md` - VLLM 模式合并分析
+- `unified-guard-dialogue-implementation.md` - 统一看护对话实现
+- `token-management-implementation-summary.md` - Token 管理实现总结
+- `vllm-unified-mode-design.md` - VLLM 统一模式设计
+- `unified-dialogue-implementation-summary.md` - 统一对话实现总结
 
 ### 📁 face-recognition/
 
@@ -174,6 +184,7 @@ Bug 修复和功能改进文档：
 - **2026-02-13**: 第十一次归档，整理智能门锁 AI Token 限制和 VLLM 配置相关文档
 - **2026-02-13**: 第十二次归档，整理 docs/completed 根目录下的未分类文档，更新 docs/my_docs/README.md
 - **2026-02-14**: 第十三次归档，归档服务器触发人脸识别功能开发文档（任务计划、检查清单、测试报告）
+- **2026-02-16**: 第十四次归档，归档统一看护对话模式功能开发文档（10个实现文档），整理测试文件到 test/doorlock/ 目录，移动辅助脚本到 scripts/ 目录，删除配置备份文件
 
 ## 说明
 

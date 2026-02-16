@@ -20,6 +20,7 @@ from core.providers.doorlock.session_manager import SessionManager
 from core.providers.doorlock.notification_service import NotificationService
 from core.providers.doorlock.doorlock_database import DoorlockDatabase
 from core.providers.vllm.doorlock_vllm import DoorlockVLLMProvider
+from core.providers.doorlock.photo_cache_manager import PhotoCacheManager
 
 TAG = "DoorlockIntentHandler"
 
@@ -62,6 +63,12 @@ class DoorlockIntentHandler:
         
         # 提示词（从配置加载）
         self.intent_recognition_prompt = config.get('intent_recognition_prompt', '')
+        
+        # 照片缓存管理器
+        self.photo_cache = PhotoCacheManager()
+        
+        # 定时拍照任务字典：{session_id: asyncio.Task}
+        self._photo_capture_tasks: Dict[str, asyncio.Task] = {}
         
         logger.bind(tag=TAG).info(
             f"意图识别处理器初始化完成: timeout={self.dialogue_timeout}s, "
@@ -610,13 +617,15 @@ class DoorlockIntentHandler:
     async def _play_initial_greeting(
         self,
         device_id: str,
-        person_info: Optional[Dict[str, Any]]
+        person_info: Optional[Dict[str, Any]],
+        conn=None
     ) -> str:
         """播放主动问候
         
         Args:
             device_id: 设备ID
             person_info: 人员信息
+            conn: 连接对象（用于TTS服务）
             
         Returns:
             问候文本
@@ -631,6 +640,8 @@ class DoorlockIntentHandler:
         logger.bind(tag=TAG).info(f"播放主动问候 - 设备: {device_id}, 内容: {greeting}")
         
         # TODO: 调用TTS服务播放语音
+        # if conn and hasattr(conn, 'tts_service'):
+        #     await conn.tts_service.play(greeting)
         
         return greeting
     
@@ -647,30 +658,37 @@ class DoorlockIntentHandler:
         # 这里简化处理，假设一直有人
         return True
     
-    async def _wait_for_visitor_response(self, device_id: str) -> Optional[str]:
+    async def _wait_for_visitor_response(self, device_id: str, conn=None) -> Optional[str]:
         """等待访客回复
         
         Args:
             device_id: 设备ID
+            conn: 连接对象（用于ASR服务）
             
         Returns:
             访客回复文本，如果没有回复返回None
         """
         # TODO: 集成ASR服务，等待语音识别结果
+        # if conn and hasattr(conn, 'asr_service'):
+        #     return await conn.asr_service.recognize()
+        
         # 这里简化处理，返回None表示没有回复
         await asyncio.sleep(1)
         return None
     
-    async def _play_ai_response(self, device_id: str, response: str):
+    async def _play_ai_response(self, device_id: str, response: str, conn=None):
         """播放AI回复
         
         Args:
             device_id: 设备ID
             response: 回复文本
+            conn: 连接对象（用于TTS服务）
         """
         logger.bind(tag=TAG).debug(f"播放AI回复 - 设备: {device_id}, 内容: {response}")
         
         # TODO: 调用TTS服务播放语音
+        # if conn and hasattr(conn, 'tts_service'):
+        #     await conn.tts_service.play(response)
     
     def _check_token_usage(self, token_usage: Dict[str, int]):
         """检查Token使用量
@@ -798,3 +816,631 @@ class DoorlockIntentHandler:
             )
             import traceback
             logger.bind(tag=TAG).error(traceback.format_exc())
+    
+    async def start_photo_capture_task(
+        self,
+        device_id: str,
+        session_id: str,
+        conn,
+        interval_seconds: int = 5
+    ) -> None:
+        """启动定时拍照任务
+        
+        在统一看护对话模式中，每隔指定时间拍照一次并缓存。
+        
+        Args:
+            device_id: 设备ID
+            session_id: 会话ID
+            conn: 连接对象（用于调用拍照接口）
+            interval_seconds: 拍照间隔（秒），默认5秒
+        """
+        logger.bind(tag=TAG).info(
+            f"启动定时拍照任务 - 设备: {device_id}, 会话: {session_id}, "
+            f"间隔: {interval_seconds}秒"
+        )
+        
+        async def photo_capture_loop():
+            """定时拍照循环"""
+            capture_count = 0
+            
+            try:
+                while True:
+                    try:
+                        # 拍照
+                        jpeg_data = await self._capture_visitor_photo(
+                            device_id=device_id,
+                            conn=conn
+                        )
+                        
+                        if jpeg_data:
+                            # 添加到缓存
+                            self.photo_cache.add_photo(
+                                session_id=session_id,
+                                photo_data=jpeg_data
+                            )
+                            
+                            capture_count += 1
+                            cache_size = self.photo_cache.get_cache_size(session_id)
+                            
+                            logger.bind(tag=TAG).debug(
+                                f"定时拍照成功 - 设备: {device_id}, 会话: {session_id}, "
+                                f"第{capture_count}次, 缓存数量: {cache_size}"
+                            )
+                        else:
+                            logger.bind(tag=TAG).warning(
+                                f"定时拍照失败 - 设备: {device_id}, 会话: {session_id}"
+                            )
+                        
+                    except Exception as e:
+                        logger.bind(tag=TAG).error(
+                            f"定时拍照异常 - 设备: {device_id}, 会话: {session_id}, "
+                            f"错误: {e}"
+                        )
+                        # 继续运行，不中断任务
+                    
+                    # 等待下一次拍照
+                    await asyncio.sleep(interval_seconds)
+                    
+            except asyncio.CancelledError:
+                logger.bind(tag=TAG).info(
+                    f"定时拍照任务已取消 - 设备: {device_id}, 会话: {session_id}, "
+                    f"总拍照次数: {capture_count}"
+                )
+                raise
+        
+        # 创建并启动异步任务
+        task = asyncio.create_task(photo_capture_loop())
+        self._photo_capture_tasks[session_id] = task
+        
+        logger.bind(tag=TAG).info(
+            f"定时拍照任务已启动 - 设备: {device_id}, 会话: {session_id}"
+        )
+    
+    async def stop_photo_capture_task(
+        self,
+        session_id: str
+    ) -> None:
+        """停止定时拍照任务
+        
+        Args:
+            session_id: 会话ID
+        """
+        logger.bind(tag=TAG).info(
+            f"停止定时拍照任务 - 会话: {session_id}"
+        )
+        
+        try:
+            # 检查任务是否存在
+            if session_id not in self._photo_capture_tasks:
+                logger.bind(tag=TAG).debug(
+                    f"定时拍照任务不存在 - 会话: {session_id}"
+                )
+                return
+            
+            # 获取任务
+            task = self._photo_capture_tasks[session_id]
+            
+            # 取消任务
+            if not task.done():
+                task.cancel()
+                
+                try:
+                    # 等待任务完成取消
+                    await task
+                except asyncio.CancelledError:
+                    # 预期的取消异常
+                    pass
+            
+            # 清理任务引用
+            del self._photo_capture_tasks[session_id]
+            
+            logger.bind(tag=TAG).info(
+                f"定时拍照任务已停止 - 会话: {session_id}"
+            )
+            
+        except Exception as e:
+            logger.bind(tag=TAG).error(
+                f"停止定时拍照任务异常 - 会话: {session_id}, 错误: {e}"
+            )
+            # 确保清理任务引用
+            self._photo_capture_tasks.pop(session_id, None)
+    
+    async def start_unified_dialogue(
+        self,
+        device_id: str,
+        session_id: str,
+        person_info: Optional[Dict[str, Any]],
+        visitor_image: bytes,
+        baseline_image: Optional[bytes],
+        conn=None
+    ) -> Dict[str, Any]:
+        """启动统一模式对话（支持看护）
+        
+        统一模式同时处理对话和看护监控任务。
+        如果看护模式激活（baseline_image不为None），则启动定时拍照任务。
+        
+        Args:
+            device_id: 设备ID
+            session_id: 会话ID
+            person_info: 人员信息（可选，陌生人为None）
+            visitor_image: 访客照片（初次拍照）
+            baseline_image: 基准图片（看护模式激活时提供）
+            conn: 连接对象（用于TTS/ASR/拍照服务）
+            
+        Returns:
+            对话结果字典
+        """
+        logger.bind(tag=TAG).info(
+            f"启动统一模式对话 - 设备: {device_id}, 会话: {session_id}, "
+            f"访客: {person_info.get('name') if person_info else '陌生人'}, "
+            f"看护模式: {'激活' if baseline_image else '未激活'}"
+        )
+        
+        # 保存初次访客照片（用于后续意图总结）
+        initial_visitor_image = visitor_image
+        
+        try:
+            # 步骤1: 如果看护模式激活，启动定时拍照任务
+            if baseline_image:
+                logger.bind(tag=TAG).info(
+                    f"看护模式已激活，启动定时拍照任务 - 会话: {session_id}"
+                )
+                await self.start_photo_capture_task(
+                    device_id=device_id,
+                    session_id=session_id,
+                    conn=conn,
+                    interval_seconds=5  # 每5秒拍照一次
+                )
+            
+            # 步骤2: 播放主动问候
+            greeting = await self._play_initial_greeting(device_id, person_info, conn)
+            
+            # 添加问候到对话历史
+            self.session_manager.add_dialogue(
+                session_id=session_id,
+                role="assistant",
+                content=greeting
+            )
+            
+            # 步骤3: 对话循环（持续到沉默30秒或PIR无人体）
+            dialogue_count = 0
+            max_rounds = self.max_dialogue_rounds
+            is_first_round = True
+            
+            while dialogue_count < max_rounds:
+                # 检查对话是否应该结束
+                should_end = await self.session_manager.check_dialogue_end(
+                    session_id=session_id,
+                    pir_detected=await self._check_pir_status(device_id)
+                )
+                
+                if should_end:
+                    logger.bind(tag=TAG).info(
+                        f"对话结束 - 会话: {session_id}, 轮次: {dialogue_count}"
+                    )
+                    break
+                
+                # 等待访客回复（ASR识别）
+                visitor_response = await self._wait_for_visitor_response(device_id, conn)
+                
+                if not visitor_response:
+                    # 访客沉默，继续检查
+                    await asyncio.sleep(1)
+                    continue
+                
+                # 添加访客回复到对话历史
+                self.session_manager.add_dialogue(
+                    session_id=session_id,
+                    role="user",
+                    content=visitor_response
+                )
+                
+                # 从PhotoCacheManager获取最新缓存照片
+                latest_photo = None
+                if baseline_image:
+                    latest_photo = self.photo_cache.get_latest_photo(session_id)
+                    if not latest_photo:
+                        logger.bind(tag=TAG).warning(
+                            f"未找到缓存照片，使用初次访客照片 - 会话: {session_id}"
+                        )
+                        latest_photo = visitor_image
+                else:
+                    # 看护未激活，使用初次访客照片
+                    latest_photo = visitor_image
+                
+                # 调用VLLM统一分析（传入语音文本+照片）
+                dialogue_history = self.session_manager.get_dialogue_history(session_id)
+                
+                # 转换图片为Base64
+                import base64
+                latest_photo_base64 = base64.b64encode(latest_photo).decode('utf-8')
+                baseline_image_base64 = None
+                if baseline_image:
+                    baseline_image_base64 = base64.b64encode(baseline_image).decode('utf-8')
+                
+                vllm_result = await self.vllm.analyze_unified(
+                    visitor_image=latest_photo_base64,
+                    baseline_image=baseline_image_base64,
+                    dialogue_history=dialogue_history,
+                    is_first_round=is_first_round
+                )
+                
+                # 播放AI回复（TTS）
+                ai_response = vllm_result.get("content", "")
+                if ai_response:
+                    # 添加AI回复到对话历史
+                    self.session_manager.add_dialogue(
+                        session_id=session_id,
+                        role="assistant",
+                        content=ai_response
+                    )
+                    
+                    # 播放AI回复
+                    await self._play_ai_response(device_id, ai_response, conn)
+                
+                # 处理工具调用
+                tool_calls = vllm_result.get("tool_calls", [])
+                if tool_calls:
+                    await self._handle_tool_calls(
+                        device_id=device_id,
+                        session_id=session_id,
+                        tool_calls=tool_calls,
+                        conn=conn
+                    )
+                
+                # 检查对话结束条件
+                # （已在循环开始时检查）
+                
+                dialogue_count += 1
+                is_first_round = False
+            
+            # 步骤4: 对话结束后停止定时拍照任务
+            if baseline_image:
+                logger.bind(tag=TAG).info(
+                    f"对话结束，停止定时拍照任务 - 会话: {session_id}"
+                )
+                await self.stop_photo_capture_task(session_id)
+            
+            # 步骤5: 对话结束后处理
+            dialogue_history = self.session_manager.get_dialogue_history(session_id)
+            post_result = await self._post_dialogue_processing(
+                device_id=device_id,
+                session_id=session_id,
+                visitor_image=initial_visitor_image,
+                baseline_image=baseline_image,
+                dialogue_history=dialogue_history,
+                conn=conn
+            )
+            
+            # 步骤6: 清理照片缓存
+            if baseline_image:
+                logger.bind(tag=TAG).info(
+                    f"清理照片缓存 - 会话: {session_id}"
+                )
+                self.photo_cache.clear_cache(session_id)
+            
+            logger.bind(tag=TAG).info(
+                f"统一模式对话完成 - 会话: {session_id}, 轮次: {dialogue_count}"
+            )
+            
+            return {
+                "success": True,
+                "action": "intent_recognized",
+                "visit_id": post_result.get("visit_id"),
+                "intent_summary": post_result.get("intent_summary"),
+                "dialogue_count": dialogue_count
+            }
+            
+        except Exception as e:
+            logger.bind(tag=TAG).error(
+                f"统一模式对话异常 - 会话: {session_id}, 错误: {e}"
+            )
+            import traceback
+            logger.bind(tag=TAG).error(traceback.format_exc())
+            
+            # 异常情况下确保停止定时拍照任务
+            if baseline_image:
+                try:
+                    await self.stop_photo_capture_task(session_id)
+                except Exception as stop_error:
+                    logger.bind(tag=TAG).error(
+                        f"停止定时拍照任务失败 - 会话: {session_id}, 错误: {stop_error}"
+                    )
+            
+            # 异常情况下确保清理照片缓存
+            if baseline_image:
+                try:
+                    self.photo_cache.clear_cache(session_id)
+                except Exception as clear_error:
+                    logger.bind(tag=TAG).error(
+                        f"清理照片缓存失败 - 会话: {session_id}, 错误: {clear_error}"
+                    )
+            
+            return {
+                "success": False,
+                "error": str(e)
+            }
+
+    async def _post_dialogue_processing(
+        self,
+        device_id: str,
+        session_id: str,
+        visitor_image: bytes,
+        baseline_image: Optional[bytes],
+        dialogue_history: List[Dict[str, str]],
+        conn=None
+    ) -> Dict[str, Any]:
+        """对话结束后的处理流程
+        
+        步骤：
+        1. 检查快递状态（如果看护激活）
+        2. 生成访客意图总结
+        3. 保存访问记录
+        4. 发送App通知
+        5. 清理会话
+        
+        Args:
+            device_id: 设备ID
+            session_id: 会话ID
+            visitor_image: 访客照片（初次拍照）
+            baseline_image: 基准图片（看护模式激活时提供）
+            dialogue_history: 完整对话历史
+            conn: 连接对象
+            
+        Returns:
+            处理结果字典
+        """
+        logger.bind(tag=TAG).info(
+            f"开始对话结束后处理 - 设备: {device_id}, 会话: {session_id}"
+        )
+        
+        try:
+            package_check_result = None
+            
+            # 步骤1: 检查快递状态（如果看护激活）
+            if baseline_image:
+                logger.bind(tag=TAG).info(
+                    f"看护模式已激活，执行快递状态检查 - 会话: {session_id}"
+                )
+                
+                # 获取最后一张缓存照片
+                last_photo = self.photo_cache.get_latest_photo(session_id)
+                if not last_photo:
+                    logger.bind(tag=TAG).warning(
+                        f"未找到缓存照片，重新拍照 - 会话: {session_id}"
+                    )
+                    last_photo = await self._capture_visitor_photo(device_id, conn)
+                
+                if last_photo:
+                    # 转换图片为Base64
+                    import base64
+                    current_image_base64 = base64.b64encode(last_photo).decode('utf-8')
+                    baseline_image_base64 = base64.b64encode(baseline_image).decode('utf-8')
+                    
+                    # 调用VLLM检查快递状态
+                    package_check_result = await self.vllm.final_package_check(
+                        current_image=current_image_base64,
+                        baseline_image=baseline_image_base64
+                    )
+                    
+                    logger.bind(tag=TAG).info(
+                        f"快递状态检查完成 - 会话: {session_id}, "
+                        f"威胁等级: {package_check_result.get('threat_level')}, "
+                        f"行为: {package_check_result.get('action')}"
+                    )
+                    
+                    # 如果检测到威胁，保存警报
+                    threat_level = package_check_result.get('threat_level', 'low')
+                    if threat_level in ['medium', 'high']:
+                        logger.bind(tag=TAG).warning(
+                            f"检测到快递威胁 - 会话: {session_id}, "
+                            f"威胁等级: {threat_level}"
+                        )
+                        # TODO: 保存警报到数据库
+                else:
+                    logger.bind(tag=TAG).error(
+                        f"无法获取照片进行快递状态检查 - 会话: {session_id}"
+                    )
+            
+            # 步骤2: 生成访客意图总结
+            logger.bind(tag=TAG).info(
+                f"生成访客意图总结 - 会话: {session_id}"
+            )
+            
+            # 转换访客图片为Base64
+            import base64
+            visitor_image_base64 = base64.b64encode(visitor_image).decode('utf-8')
+            
+            intent_summary = await self.vllm.generate_intent_summary(
+                visitor_image=visitor_image_base64,
+                dialogue_history=dialogue_history
+            )
+            
+            logger.bind(tag=TAG).info(
+                f"意图总结生成完成 - 会话: {session_id}, "
+                f"意图类型: {intent_summary.get('intent_type')}"
+            )
+            
+            # 步骤3: 保存访问记录
+            logger.bind(tag=TAG).info(
+                f"保存访问记录 - 会话: {session_id}"
+            )
+            
+            visit_id = await self._save_visit_record(
+                session_id=session_id,
+                person_info=None,  # TODO: 从会话中获取person_info
+                intent_summary=intent_summary,
+                dialogue_history=dialogue_history,
+                visitor_image=visitor_image,
+                package_check_result=package_check_result
+            )
+            
+            # 步骤4: 发送App通知
+            logger.bind(tag=TAG).info(
+                f"发送App通知 - 会话: {session_id}, visit_id: {visit_id}"
+            )
+            
+            await self.notification_service.notify_visitor_intent(
+                visit_id=visit_id,
+                session_id=session_id,
+                person_info={"person_id": None, "name": "陌生人", "relation_type": "unknown"},
+                intent_summary=intent_summary,
+                dialogue_text=dialogue_history
+            )
+            
+            # 步骤5: 清理会话
+            logger.bind(tag=TAG).info(
+                f"清理会话 - 会话: {session_id}"
+            )
+            # 注意：会话清理由调用方负责
+            
+            logger.bind(tag=TAG).info(
+                f"对话结束后处理完成 - 会话: {session_id}, visit_id: {visit_id}"
+            )
+            
+            return {
+                "success": True,
+                "visit_id": visit_id,
+                "intent_summary": intent_summary,
+                "package_check_result": package_check_result
+            }
+            
+        except Exception as e:
+            logger.bind(tag=TAG).error(
+                f"对话结束后处理异常 - 会话: {session_id}, 错误: {e}"
+            )
+            import traceback
+            logger.bind(tag=TAG).error(traceback.format_exc())
+            
+            return {
+                "success": False,
+                "error": str(e)
+            }
+    
+    async def _handle_tool_calls(
+        self,
+        device_id: str,
+        session_id: str,
+        tool_calls: List[Dict[str, Any]],
+        conn=None
+    ) -> None:
+        """处理工具调用
+        
+        遍历工具调用列表，补充必要参数并执行。
+        高威胁时立即播放警告语音。
+        
+        Args:
+            device_id: 设备ID
+            session_id: 会话ID
+            tool_calls: 工具调用列表
+            conn: 连接对象
+        """
+        logger.bind(tag=TAG).info(
+            f"处理工具调用 - 设备: {device_id}, 会话: {session_id}, "
+            f"工具数量: {len(tool_calls)}"
+        )
+        
+        for tool_call in tool_calls:
+            try:
+                tool_name = tool_call.get("name")
+                arguments = tool_call.get("arguments", {})
+                
+                logger.bind(tag=TAG).info(
+                    f"执行工具调用 - 工具: {tool_name}, 参数: {arguments}"
+                )
+                
+                # 补充必要参数
+                if "device_id" not in arguments:
+                    arguments["device_id"] = device_id
+                if "session_id" not in arguments:
+                    arguments["session_id"] = session_id
+                
+                # 执行工具调用
+                if hasattr(self.vllm, 'doorlock_tools'):
+                    result = await self.vllm.doorlock_tools.call_tool(
+                        tool_name=tool_name,
+                        arguments=arguments
+                    )
+                    
+                    logger.bind(tag=TAG).info(
+                        f"工具调用完成 - 工具: {tool_name}, 结果: {result}"
+                    )
+                    
+                    # 高威胁特殊处理：立即播放警告
+                    if tool_name == "report_package_status":
+                        threat_level = arguments.get("threat_level", "low")
+                        if threat_level == "high":
+                            logger.bind(tag=TAG).warning(
+                                f"检测到高威胁，播放警告语音 - 会话: {session_id}"
+                            )
+                            
+                            warning_message = "警告！检测到可疑行为，请立即停止！"
+                            await self._play_ai_response(
+                                device_id=device_id,
+                                response=warning_message,
+                                conn=conn
+                            )
+                else:
+                    logger.bind(tag=TAG).warning(
+                        f"VLLM提供者未配置doorlock_tools，跳过工具调用 - 工具: {tool_name}"
+                    )
+                
+            except Exception as e:
+                logger.bind(tag=TAG).error(
+                    f"工具调用执行异常 - 工具: {tool_call.get('name')}, 错误: {e}"
+                )
+                import traceback
+                logger.bind(tag=TAG).error(traceback.format_exc())
+                # 继续处理下一个工具调用
+    
+    async def _save_visit_record(
+        self,
+        session_id: str,
+        person_info: Optional[Dict[str, Any]],
+        intent_summary: Dict[str, Any],
+        dialogue_history: List[Dict[str, str]],
+        visitor_image: bytes,
+        package_check_result: Optional[Dict[str, Any]] = None
+    ) -> int:
+        """保存访问记录到数据库
+        
+        Args:
+            session_id: 会话ID
+            person_info: 人员信息
+            intent_summary: 意图总结
+            dialogue_history: 对话历史
+            visitor_image: 访客照片
+            package_check_result: 快递检查结果（可选）
+            
+        Returns:
+            visit_id
+        """
+        try:
+            # 保存访客意图记录
+            from core.providers.doorlock.models import VisitorIntent
+            
+            # 合并意图总结和快递检查结果
+            full_summary = intent_summary.copy()
+            if package_check_result:
+                full_summary["package_check"] = package_check_result
+            
+            intent = VisitorIntent(
+                visit_id=None,  # TODO: 关联visit_records表
+                session_id=session_id,
+                person_id=person_info.get("person_id") if person_info else None,
+                intent_type=intent_summary.get("intent_type", "other"),
+                intent_summary=full_summary,
+                dialogue_history=dialogue_history
+            )
+            
+            visit_id = await self.db.save_visitor_intent(intent)
+            
+            logger.bind(tag=TAG).info(
+                f"访问记录已保存 - visit_id: {visit_id}, session_id: {session_id}"
+            )
+            
+            return visit_id
+            
+        except Exception as e:
+            logger.bind(tag=TAG).error(f"保存访问记录异常: {e}")
+            return 0

@@ -43,13 +43,12 @@ def test_intent_recognition_prompt(config):
     assert '对话策略' in prompt, "缺少对话策略"
     assert '工具调用' in prompt, "缺少工具调用说明"
     
-    # 检查5个工具函数
+    # 检查4个工具函数
     tools = [
         'enable_package_guard',
         'disable_package_guard',
         'update_package_baseline',
-        'report_package_status',
-        'report_visitor_intent'
+        'report_package_status'
     ]
     
     for tool in tools:
@@ -173,8 +172,7 @@ def test_tool_schema_consistency():
         'enable_package_guard',
         'disable_package_guard',
         'update_package_baseline',
-        'report_package_status',
-        'report_visitor_intent'
+        'report_package_status'
     ]
     
     for tool in expected_tools:

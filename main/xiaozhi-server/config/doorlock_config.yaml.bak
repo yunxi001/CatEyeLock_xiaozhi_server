@@ -16,33 +16,7 @@ mysql:
   database: smart_doorlock
   pool_size: 5
 
-# 统一智能看护对话模式配置
-unified_mode:
-  # 是否启用统一模式（对话和看护统一处理）
-  enabled: true
-  
-  # 对话配置
-  dialogue:
-    # 最大对话轮次
-    max_rounds: 10
-    # 沉默超时时间（秒）
-    timeout_seconds: 30
-  
-  # 看护配置
-  guard:
-    # 威胁检测方式：behavior_based（基于行为触发）
-    threat_detection: "behavior_based"
-    # 威胁等级报告阈值：medium（威胁等级≥medium时报告）
-    report_threshold: "medium"
-  
-  # Token优化配置
-  token_optimization:
-    # 仅第一轮传入基准图片
-    baseline_image_once: true
-    # 依赖AI上下文理解
-    reuse_context: true
-
-# 快递看护模式配置（兼容旧配置）
+# 快递看护模式配置
 package_guard:
   # 拍照间隔（秒）
   photo_interval: 5
@@ -51,14 +25,7 @@ package_guard:
   # 警报照片存储目录
   alert_photo_dir: "data/face_recognition/doorlock_photos/"
 
-# 照片缓存配置
-photo_cache:
-  # 定时拍照间隔（秒）
-  interval_seconds: 5
-  # 最大缓存照片数量
-  max_cache_size: 10
-
-# 意图识别配置（兼容旧配置）
+# 意图识别配置
 intent_recognition:
   # 对话超时时间（秒）
   dialogue_timeout: 30

@@ -24,7 +24,7 @@ def test_tools_schema():
     
     # 验证Schema结构
     assert isinstance(schema, list), "Schema应该是列表"
-    assert len(schema) == 5, f"应该有5个工具函数，实际有{len(schema)}个"
+    assert len(schema) == 4, f"应该有4个工具函数，实际有{len(schema)}个"
     
     # 验证每个工具的必需字段
     required_fields = ["name", "description", "parameters"]
@@ -45,8 +45,7 @@ def test_tools_schema():
         "enable_package_guard",
         "disable_package_guard",
         "update_package_baseline",
-        "report_package_status",
-        "report_visitor_intent"
+        "report_package_status"
     ]
     
     for expected in expected_tools:
@@ -71,7 +70,7 @@ def main():
         print()
         print("测试总结:")
         print("✓ 工具函数可被VLLM正确识别（Schema验证通过）")
-        print("✓ 工具函数定义完整（5个工具函数全部存在）")
+        print("✓ 工具函数定义完整（4个工具函数全部存在）")
         print("✓ 工具函数参数Schema正确（包含必需字段）")
         
         return True

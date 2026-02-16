@@ -5,7 +5,6 @@
 - 启用/关闭快递看护模式
 - 更新看护基准图片
 - 报告快递状态
-- 报告访客意图
 
 每个工具函数都定义了完整的JSON Schema供VLLM调用
 """
@@ -106,38 +105,6 @@ class DoorlockTools:
                     }
                 },
                 "required": ["device_id", "session_id", "action", "threat_level", "description"]
-            }
-        },
-        {
-            "name": "report_visitor_intent",
-            "description": "报告访客意图。在对话结束时调用此函数，生成结构化总结。",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "device_id": {
-                        "type": "string",
-                        "description": "设备ID"
-                    },
-                    "session_id": {
-                        "type": "string",
-                        "description": "会话ID"
-                    },
-                    "intent_type": {
-                        "type": "string",
-                        "enum": ["delivery", "visit", "sales", "maintenance", "other"],
-                        "description": "意图类型：delivery(送快递/外卖)、visit(拜访)、sales(推销)、maintenance(维修/物业)、other(其他)"
-                    },
-                    "summary": {
-                        "type": "string",
-                        "description": "完整的对话总结，简洁明了地概括访客来访目的和关键信息"
-                    },
-                    "important_notes": {
-                        "type": "array",
-                        "items": {"type": "string"},
-                        "description": "重要信息列表，每条以【留言】或【提醒】开头，例如：['【留言】明天下午3点再来', '【提醒】带了礼物放门口']"
-                    }
-                },
-                "required": ["device_id", "session_id", "intent_type", "summary", "important_notes"]
             }
         }
     ]
@@ -424,104 +391,6 @@ class DoorlockTools:
                 "message": f"报告快递状态异常: {str(e)}"
             }
     
-    async def report_visitor_intent(
-        self,
-        device_id: str,
-        session_id: str,
-        intent_type: str,
-        summary: str,
-        important_notes: list
-    ) -> Dict[str, Any]:
-        """报告访客意图
-        
-        Args:
-            device_id: 设备ID
-            session_id: 会话ID
-            intent_type: 意图类型
-            summary: 完整总结
-            important_notes: 重要信息列表
-            
-        Returns:
-            执行结果字典
-        """
-        try:
-            # 参数验证
-            if not device_id or not session_id:
-                logger.bind(tag=TAG).error("报告访客意图失败: device_id或session_id为空")
-                return {
-                    "success": False,
-                    "message": "设备ID和会话ID不能为空"
-                }
-            
-            # 验证intent_type枚举值
-            valid_intent_types = ["delivery", "visit", "sales", "maintenance", "other"]
-            if intent_type not in valid_intent_types:
-                logger.bind(tag=TAG).warning(
-                    f"报告访客意图: intent_type值无效 ({intent_type})，使用默认值 'other'"
-                )
-                intent_type = "other"
-            
-            # 确保important_notes是列表
-            if not isinstance(important_notes, list):
-                important_notes = [str(important_notes)] if important_notes else []
-            
-            # 创建意图记录
-            intent = VisitorIntent(
-                session_id=session_id,
-                intent_type=intent_type,
-                intent_summary={
-                    "important_notes": important_notes,
-                    "intent_type": intent_type,
-                    "purpose": summary,
-                    "full_summary": summary
-                },
-                dialogue_history=[],  # 对话历史由会话管理器提供
-                visit_id=None,  # TODO: 关联visit_records表
-                person_id=None  # TODO: 关联persons表
-            )
-            
-            # 保存到数据库
-            intent_id = await self.db.save_visitor_intent(intent)
-            
-            if intent_id > 0:
-                # 发送通知到App
-                await self.notification_service.notify_visitor_intent(
-                    visit_id=intent.visit_id,
-                    session_id=session_id,
-                    person_info={},  # TODO: 获取人员信息
-                    intent_summary=intent.intent_summary,
-                    dialogue_text=[]  # TODO: 获取对话文本
-                )
-                
-                logger.bind(tag=TAG).info(
-                    f"工具调用成功 - report_visitor_intent: intent_id={intent_id}, "
-                    f"device_id={device_id}, intent_type={intent_type}"
-                )
-                return {
-                    "success": True,
-                    "message": f"访客意图已记录: {intent_type}",
-                    "intent_id": intent_id,
-                    "intent_type": intent_type,
-                    "summary": summary
-                }
-            else:
-                logger.bind(tag=TAG).error(
-                    f"工具调用失败 - report_visitor_intent: 保存意图记录失败"
-                )
-                return {
-                    "success": False,
-                    "message": "保存访客意图失败"
-                }
-                
-        except Exception as e:
-            logger.bind(tag=TAG).error(
-                f"工具调用异常 - report_visitor_intent: device_id={device_id}, "
-                f"session_id={session_id}, error={e}"
-            )
-            return {
-                "success": False,
-                "message": f"报告访客意图异常: {str(e)}"
-            }
     
     async def call_tool(self, tool_name: str, arguments: Dict[str, Any]) -> Dict[str, Any]:
         """工具调用路由
@@ -563,15 +432,6 @@ class DoorlockTools:
                     action=arguments.get("action", "normal"),
                     threat_level=arguments.get("threat_level", "low"),
                     description=arguments.get("description", "")
-                )
-            
-            elif tool_name == "report_visitor_intent":
-                return await self.report_visitor_intent(
-                    device_id=arguments.get("device_id", ""),
-                    session_id=arguments.get("session_id", ""),
-                    intent_type=arguments.get("intent_type", "other"),
-                    summary=arguments.get("summary", ""),
-                    important_notes=arguments.get("important_notes", [])
                 )
             
             else:

@@ -322,6 +322,462 @@ class DoorlockVLLMProvider(VLLMProviderBase):
         """
         return self.prompts.get(prompt_name, "")
     
+    def _build_unified_prompt(self, has_baseline: bool) -> str:
+        """动态组合统一模式提示词
+        
+        Args:
+            has_baseline: 是否有基准图片（看护模式是否激活）
+            
+        Returns:
+            组合后的完整提示词字符串
+        """
+        # 基础部分（总是包含）
+        prompt_parts = [
+            self.get_prompt("core_role_and_style"),
+            self.get_prompt("dialogue_tasks")
+        ]
+        
+        # 如果看护模式激活，添加看护任务
+        if has_baseline:
+            prompt_parts.append(self.get_prompt("guard_tasks"))
+        
+        # 总是添加工具指南
+        prompt_parts.append(self.get_prompt("tools_guide"))
+        
+        # 过滤空提示词并拼接
+        prompt_parts = [p for p in prompt_parts if p]
+        
+        return "\n\n".join(prompt_parts)
+    
+    async def analyze_unified(
+        self,
+        visitor_image: str,
+        baseline_image: Optional[str],
+        dialogue_history: List[Dict[str, str]],
+        is_first_round: bool = False
+    ) -> Dict[str, Any]:
+        """统一模式分析，同时处理对话和监控任务
+        
+        Args:
+            visitor_image: 访客照片（Base64编码）
+            baseline_image: 基准图片（Base64编码，可选）
+            dialogue_history: 对话历史列表
+            is_first_round: 是否第一轮对话
+            
+        Returns:
+            分析结果字典，包含：
+            - content: AI回复文本
+            - tool_calls: 工具调用列表
+            - token_usage: Token统计
+            - response_time: 响应时间（秒）
+        """
+        start_time = time.time()
+        
+        try:
+            # 1. 构建图片列表（第一轮传2张，后续传1张）
+            images = []
+            if is_first_round and baseline_image:
+                # 第一轮：传入访客图片和基准图片
+                images = [visitor_image, baseline_image]
+                self.logger.bind(tag=TAG).debug(
+                    "统一模式第一轮：传入2张图片（访客图片+基准图片）"
+                )
+            else:
+                # 后续轮次：仅传入访客图片
+                images = [visitor_image]
+                self.logger.bind(tag=TAG).debug(
+                    "统一模式后续轮次：传入1张图片（访客图片）"
+                )
+            
+            # 2. 检查图片Token限制
+            if not self._check_image_token_limit(len(images)):
+                error_msg = (
+                    f"图片Token超出限制: {len(images)}张图片估算 "
+                    f"{self._estimate_image_tokens(len(images))} tokens > "
+                    f"{self.max_image_tokens}"
+                )
+                self.logger.bind(tag=TAG).error(error_msg)
+                raise ValueError(error_msg)
+            
+            # 3. 动态组合提示词（根据是否有基准图片）
+            has_baseline = baseline_image is not None
+            system_prompt = self._build_unified_prompt(has_baseline)
+            
+            if has_baseline:
+                self.logger.bind(tag=TAG).debug(
+                    "统一模式提示词：包含看护任务（看护模式激活）"
+                )
+            else:
+                self.logger.bind(tag=TAG).debug(
+                    "统一模式提示词：仅对话任务（看护模式未激活）"
+                )
+            
+            # 4. 调用VLLM进行分析
+            # 构建问题文本
+            if dialogue_history:
+                # 从对话历史中提取最后一条用户消息
+                last_user_msg = None
+                for msg in reversed(dialogue_history):
+                    if msg.get("role") == "user":
+                        last_user_msg = msg.get("content", "")
+                        break
+                
+                question = last_user_msg or "请继续对话。"
+            else:
+                # 第一轮对话，主动问候
+                question = "请根据访客照片，主动问候访客并询问来访目的。"
+            
+            # 调用analyze_with_tools方法
+            result = self.analyze_with_tools(
+                question=question,
+                images=images,
+                dialogue_history=dialogue_history,
+                system_prompt=system_prompt
+            )
+            
+            # 5. 返回结果（已包含Token统计和响应时间）
+            return result
+            
+        except Exception as e:
+            self.logger.bind(tag=TAG).error(f"统一模式分析异常: {e}")
+            # 返回默认响应
+            return {
+                "content": "抱歉，我暂时无法理解，请稍后再试。",
+                "tool_calls": [],
+                "token_usage": {
+                    "prompt_tokens": 0,
+                    "completion_tokens": 0,
+                    "total_tokens": 0
+                },
+                "response_time": time.time() - start_time
+            }
+    
+    async def final_package_check(
+        self,
+        current_image: str,
+        baseline_image: str
+    ) -> Dict[str, Any]:
+        """对话结束后的快递状态最终检查
+        
+        Args:
+            current_image: 当前图片（Base64编码）
+            baseline_image: 基准图片（Base64编码）
+            
+        Returns:
+            检查结果字典，包含：
+            - threat_level: 威胁等级 ("low"|"medium"|"high")
+            - action: 行为类型 ("taking"|"searching"|"damaging"|"normal"|"passing")
+            - description: 详细描述
+        """
+        start_time = time.time()
+        
+        try:
+            # 1. 检查图片Token限制（2张图片）
+            if not self._check_image_token_limit(2):
+                error_msg = (
+                    f"图片Token超出限制: 2张图片估算 "
+                    f"{self._estimate_image_tokens(2)} tokens > "
+                    f"{self.max_image_tokens}"
+                )
+                self.logger.bind(tag=TAG).error(error_msg)
+                raise ValueError(error_msg)
+            
+            # 2. 加载专用提示词
+            system_prompt = self.get_prompt("final_package_check_prompt")
+            
+            if not system_prompt:
+                self.logger.bind(tag=TAG).warning(
+                    "未找到final_package_check_prompt提示词，使用默认提示词"
+                )
+                system_prompt = """
+【任务】
+访客已离开，请对比基准图片和当前图片，判断快递的最终状态。
+
+【要求】
+- 对比两张图片，判断快递是否被移动、拿走或破坏
+- 评估威胁等级
+- 以纯JSON格式返回结果
+
+【输出格式】
+```json
+{
+  "threat_level": "low|medium|high",
+  "action": "taking|searching|damaging|normal|passing",
+  "description": "详细描述你看到的情况"
+}
+```
+
+【判断标准】
+- 快递位置未变化 = low + normal
+- 快递被移动但未拿走 = medium + searching
+- 快递被拿走 = high + taking（除非是主人）
+- 快递被破坏 = high + damaging
+"""
+            
+            # 3. 构建问题文本
+            question = """
+请对比基准图片和当前图片，判断快递的最终状态。
+
+第一张图片是基准图片（之前的状态）
+第二张图片是当前图片（现在的状态）
+
+请以纯JSON格式返回结果，不要包含任何其他文字说明。
+"""
+            
+            # 4. 调用VLLM（不使用工具函数）
+            messages = self._build_messages(
+                question=question,
+                images=[baseline_image, current_image],
+                dialogue_history=[],
+                system_prompt=system_prompt
+            )
+            
+            # 调用VLLM（不传入tools参数）
+            response = self.client.chat.completions.create(
+                model=self.model_name,
+                messages=messages,
+                temperature=self.temperature,
+                top_p=self.top_p,
+                max_tokens=min(self.max_tokens, self.max_output_tokens),
+                stream=False
+            )
+            
+            # 计算响应时间
+            response_time = time.time() - start_time
+            
+            # 提取响应内容
+            content = response.choices[0].message.content or ""
+            
+            # Token统计
+            token_usage = {
+                "prompt_tokens": response.usage.prompt_tokens,
+                "completion_tokens": response.usage.completion_tokens,
+                "total_tokens": response.usage.total_tokens
+            }
+            
+            # Token使用量检查
+            self._check_token_usage(token_usage, response_time, 0)
+            
+            # 5. 解析纯JSON格式结果
+            result = self._parse_json_response(content)
+            
+            # 验证必需字段
+            if not all(k in result for k in ["threat_level", "action", "description"]):
+                self.logger.bind(tag=TAG).warning(
+                    f"快递状态检查结果缺少必需字段，返回默认值"
+                )
+                return self._get_default_package_check_result()
+            
+            self.logger.bind(tag=TAG).info(
+                f"快递状态检查完成: threat_level={result['threat_level']}, "
+                f"action={result['action']}, response_time={response_time:.2f}s"
+            )
+            
+            return result
+            
+        except Exception as e:
+            self.logger.bind(tag=TAG).error(f"快递状态检查异常: {e}")
+            # 6. 异常处理：返回默认低威胁结果
+            return self._get_default_package_check_result()
+    
+    def _parse_json_response(self, content: str) -> Dict[str, Any]:
+        """解析JSON格式的响应内容
+        
+        Args:
+            content: 响应内容（可能包含markdown代码块）
+            
+        Returns:
+            解析后的字典
+        """
+        import json
+        import re
+        
+        try:
+            # 尝试直接解析
+            return json.loads(content)
+        except json.JSONDecodeError:
+            # 尝试从markdown代码块中提取JSON
+            json_match = re.search(r'```(?:json)?\s*(\{.*?\})\s*```', content, re.DOTALL)
+            if json_match:
+                try:
+                    return json.loads(json_match.group(1))
+                except json.JSONDecodeError:
+                    pass
+            
+            # 尝试查找第一个完整的JSON对象
+            json_match = re.search(r'\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}', content, re.DOTALL)
+            if json_match:
+                try:
+                    return json.loads(json_match.group(0))
+                except json.JSONDecodeError:
+                    pass
+            
+            # 解析失败
+            self.logger.bind(tag=TAG).error(f"JSON解析失败，原始内容: {content[:200]}")
+            raise ValueError("无法解析JSON响应")
+    
+    def _get_default_package_check_result(self) -> Dict[str, Any]:
+        """获取默认的快递检查结果（低威胁）
+        
+        Returns:
+            默认结果字典
+        """
+        return {
+            "threat_level": "low",
+            "action": "normal",
+            "description": "无法解析检查结果，默认判定为正常状态"
+        }
+    
+    async def generate_intent_summary(
+        self,
+        visitor_image: str,
+        dialogue_history: List[Dict[str, str]]
+    ) -> Dict[str, Any]:
+        """生成访客意图总结
+        
+        Args:
+            visitor_image: 访客照片（Base64编码）
+            dialogue_history: 完整对话历史
+            
+        Returns:
+            总结结果字典，包含：
+            - intent_type: 意图类型 ("delivery"|"visit"|"sales"|"maintenance"|"other")
+            - summary: 简洁总结
+            - important_notes: 重要信息列表
+            - ai_analysis: 详细分析
+        """
+        start_time = time.time()
+        
+        try:
+            # 1. 检查图片Token限制（1张图片）
+            if not self._check_image_token_limit(1):
+                error_msg = (
+                    f"图片Token超出限制: 1张图片估算 "
+                    f"{self._estimate_image_tokens(1)} tokens > "
+                    f"{self.max_image_tokens}"
+                )
+                self.logger.bind(tag=TAG).error(error_msg)
+                raise ValueError(error_msg)
+            
+            # 2. 加载专用提示词
+            system_prompt = self.get_prompt("intent_summary_prompt")
+            
+            if not system_prompt:
+                self.logger.bind(tag=TAG).warning(
+                    "未找到intent_summary_prompt提示词，使用默认提示词"
+                )
+                system_prompt = """
+【任务】
+根据完整的对话历史和访客照片，生成结构化的访客意图总结。
+
+【要求】
+- 识别访客意图类型
+- 提取重要信息（留言、提醒）
+- 生成完整总结
+- 提供AI分析
+
+【输出格式】
+```json
+{
+  "intent_type": "delivery|visit|sales|maintenance|other",
+  "summary": "简洁的总结（一句话）",
+  "important_notes": [
+    "【留言】...",
+    "【提醒】..."
+  ],
+  "ai_analysis": "详细的AI分析，包括访客特征、行为观察、建议等"
+}
+```
+
+【意图类型说明】
+- delivery: 送快递/外卖
+- visit: 拜访朋友/家人
+- sales: 推销产品/服务
+- maintenance: 维修/物业工作
+- other: 其他情况
+"""
+            
+            # 3. 构建问题文本
+            question = """
+请根据完整的对话历史和访客照片，生成结构化的访客意图总结。
+
+请以JSON格式返回结果。
+"""
+            
+            # 4. 调用VLLM（不使用工具函数）
+            messages = self._build_messages(
+                question=question,
+                images=[visitor_image],
+                dialogue_history=dialogue_history,
+                system_prompt=system_prompt
+            )
+            
+            # 调用VLLM（不传入tools参数）
+            response = self.client.chat.completions.create(
+                model=self.model_name,
+                messages=messages,
+                temperature=self.temperature,
+                top_p=self.top_p,
+                max_tokens=min(self.max_tokens, self.max_output_tokens),
+                stream=False
+            )
+            
+            # 计算响应时间
+            response_time = time.time() - start_time
+            
+            # 提取响应内容
+            content = response.choices[0].message.content or ""
+            
+            # Token统计
+            token_usage = {
+                "prompt_tokens": response.usage.prompt_tokens,
+                "completion_tokens": response.usage.completion_tokens,
+                "total_tokens": response.usage.total_tokens
+            }
+            
+            # Token使用量检查
+            self._check_token_usage(token_usage, response_time, 0)
+            
+            # 5. 解析混合JSON格式结果
+            result = self._parse_json_response(content)
+            
+            # 验证必需字段
+            required_fields = ["intent_type", "summary", "important_notes", "ai_analysis"]
+            if not all(k in result for k in required_fields):
+                self.logger.bind(tag=TAG).warning(
+                    f"意图总结结果缺少必需字段，返回默认值"
+                )
+                return self._get_default_intent_summary()
+            
+            # 确保important_notes是列表
+            if not isinstance(result.get("important_notes"), list):
+                result["important_notes"] = []
+            
+            self.logger.bind(tag=TAG).info(
+                f"意图总结生成完成: intent_type={result['intent_type']}, "
+                f"response_time={response_time:.2f}s"
+            )
+            
+            return result
+            
+        except Exception as e:
+            self.logger.bind(tag=TAG).error(f"意图总结生成异常: {e}")
+            # 6. 异常处理：返回默认总结结果
+            return self._get_default_intent_summary()
+    
+    def _get_default_intent_summary(self) -> Dict[str, Any]:
+        """获取默认的意图总结结果
+        
+        Returns:
+            默认总结字典
+        """
+        return {
+            "intent_type": "other",
+            "summary": "访客到访，无法生成详细总结",
+            "important_notes": [],
+            "ai_analysis": "由于系统异常，无法生成详细的访客分析"
+        }
+    
     def response(self, question: str, base64_image: str) -> str:
         """标准VLLM响应（兼容基类接口）
         

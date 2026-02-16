@@ -120,14 +120,14 @@ async def test_tool_routing():
                 }
             },
             {
-                "name": "report_visitor_intent",
-                "tool_name": "report_visitor_intent",
+                "name": "report_package_status",
+                "tool_name": "report_package_status",
                 "arguments": {
                     "device_id": "test_device_001",
                     "session_id": "test_session_001",
-                    "intent_type": "delivery",
-                    "summary": "快递员送快递",
-                    "important_notes": ["【留言】快递放门口了"]
+                    "action": "normal",
+                    "threat_level": "low",
+                    "description": "测试报告快递状态"
                 }
             }
         ]

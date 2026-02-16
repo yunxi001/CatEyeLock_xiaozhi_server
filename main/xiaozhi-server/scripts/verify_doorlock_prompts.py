@@ -57,7 +57,6 @@ def verify_prompts():
             'disable_package_guard',
             'update_package_baseline',
             'report_package_status',
-            'report_visitor_intent',
             '示例对话'
         ]
         
@@ -159,8 +158,7 @@ def verify_prompts():
         tools_in_intent = [
             'enable_package_guard',
             'disable_package_guard',
-            'update_package_baseline',
-            'report_visitor_intent'
+            'update_package_baseline'
         ]
         
         tools_in_guard = [

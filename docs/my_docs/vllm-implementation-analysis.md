@@ -1,151 +1,425 @@
-# VLLM 意图识别实现机制分析
+# 统一智能看护对话模式实现机制分析
 
 ## 概述
 
-本文档详细分析智能门锁 VLLM 意图识别模块的实现机制，包括照片处理、提示词、工具调用等核心功能。
+本文档详细分析智能门锁统一智能看护对话模式的实现机制。该模式将意图识别对话和快递看护监控统一到一个智能流程中，实现了对话优先、后台监控的无缝体验。
+
+**核心特性**：
+
+- 对话和看护统一处理
+- 定时拍照机制（每 5 秒）
+- Token 优化（仅第一轮传基准图片）
+- 程序控制的结构化询问
+
+**文档版本**：v2.0  
+**最后更新**：2026-02-16  
+**对应规范**：unified-guard-dialogue-mode
 
 ---
 
-## 1. 照片给 AI 的机制
+## 1. 核心架构变化
 
-### 1.1 支持多张照片
+### 1.1 旧架构 vs 新架构
 
-**✅ 是的，支持一次给多张照片！**
+**旧架构（分离模式）**：
 
-从代码实现来看：
+```
+意图识别模式：访客对话 → 生成意图总结
+看护监控模式：定时拍照 → 对比分析 → 威胁检测
+```
+
+**新架构（统一模式）**：
+
+```
+统一模式：访客对话 + 后台监控 → 对话结束后检查 → 生成意图总结
+```
+
+### 1.2 关键变化
+
+| 方面         | 旧实现                        | 新实现                               |
+| ------------ | ----------------------------- | ------------------------------------ |
+| **模式**     | 对话和看护分离                | 对话和看护统一                       |
+| **拍照时机** | 每轮对话时临时拍照            | 对话开始后定时拍照（每 5 秒）        |
+| **照片缓存** | 无缓存                        | PhotoCacheManager 管理（最多 10 张） |
+| **图片传递** | 每轮传访客照片                | 第一轮传 2 张，后续传最新缓存照片    |
+| **意图总结** | AI 调用 report_visitor_intent | 程序调用 generate_intent_summary     |
+| **快递检查** | 定时循环检查                  | 对话结束后一次性检查                 |
+
+---
+
+## 2. 定时拍照机制
+
+### 2.1 PhotoCacheManager 照片缓存管理器
+
+**核心类**：`core/providers/doorlock/photo_cache_manager.py`
+
+**设计模式**：单例模式
+
+**功能**：
+
+- 按 session_id 管理照片缓存
+- 每个 session 最多保留 10 张照片
+- 使用 `deque` 自动清理超过限制的旧照片
+- 照片以 Base64 格式存储在内存中
+
+**关键方法**：
 
 ```python
-# core/providers/vllm/doorlock_vllm.py
+class PhotoCacheManager:
+    def add_photo(self, session_id: str, photo_data: bytes) -> None:
+        """添加照片到缓存（自动清理超过10张的旧照片）"""
 
-def analyze_with_tools(
+    def get_latest_photo(self, session_id: str) -> Optional[str]:
+        """获取最新的缓存照片（Base64格式）"""
+
+    def clear_cache(self, session_id: str) -> None:
+        """清理指定session的所有缓存照片"""
+
+    def get_cache_size(self, session_id: str) -> int:
+        """获取指定session的缓存数量"""
+```
+
+**数据结构**：
+
+```python
+# 照片缓存字典
+self._cache: Dict[str, Deque[Dict]] = {}
+
+# 每个session的缓存结构
+{
+    "session_id_1": deque([
+        {"photo": "base64_string", "timestamp": datetime},
+        {"photo": "base64_string", "timestamp": datetime},
+        ...  # 最多10张
+    ]),
+    "session_id_2": deque([...])
+}
+```
+
+### 2.2 定时拍照任务
+
+**实现位置**：`core/handle/doorlock_intent_handler.py`
+
+**启动时机**：看护模式激活时，在 `start_unified_dialogue` 方法中启动
+
+**关键方法**：
+
+```python
+async def start_photo_capture_task(
     self,
-    question: str,
-    images: List[str],  # ← 注意这里是列表！
-    dialogue_history: List[Dict[str, str]],
-    system_prompt: Optional[str] = None
-) -> Dict[str, Any]:
+    device_id: str,
+    session_id: str,
+    conn,
+    interval_seconds: int = 5  # 默认5秒
+) -> None:
+    """启动定时拍照任务"""
+
+    async def photo_capture_loop():
+        """定时拍照循环"""
+        capture_count = 0
+
+        try:
+            while True:
+                try:
+                    # 1. 调用ESP32拍照接口
+                    jpeg_data = await self._capture_visitor_photo(device_id, conn)
+
+                    # 2. 添加到PhotoCacheManager
+                    if jpeg_data:
+                        self.photo_cache.add_photo(session_id, jpeg_data)
+                        capture_count += 1
+                        cache_size = self.photo_cache.get_cache_size(session_id)
+                        logger.debug(f"定时拍照成功 - 第{capture_count}次, 缓存数量: {cache_size}")
+                    else:
+                        logger.warning(f"定时拍照失败")
+
+                except Exception as e:
+                    logger.error(f"定时拍照异常: {e}")
+                    # 继续运行，不中断任务
+
+                # 3. 等待下一次拍照
+                await asyncio.sleep(interval_seconds)
+
+        except asyncio.CancelledError:
+            logger.info(f"定时拍照任务已取消 - 总拍照次数: {capture_count}")
+            raise
+
+    # 创建并启动异步任务
+    task = asyncio.create_task(photo_capture_loop())
+    self._photo_capture_tasks[session_id] = task
 ```
 
-**支持的场景**：
-
-1. **单图片模式**（意图识别）：
-
-   ```python
-   await vllm.analyze_intent(
-       visitor_image="base64_image",  # 1张访客照片
-       dialogue_history=[...],
-       system_prompt="..."
-   )
-   ```
-
-2. **双图片模式**（看护监控）：
-   ```python
-   await vllm.analyze_package_status(
-       current_image="base64_current",   # 当前图片
-       baseline_image="base64_baseline", # 基准图片
-       dialogue_history=[...],
-       system_prompt="..."
-   )
-   ```
-
-### 1.2 图片格式和编码
-
-**格式要求**：
-
-- 编码：Base64 字符串
-- 原始格式：JPEG
-- 传输方式：嵌入在 JSON 消息的 `image_url` 字段中
-
-**代码实现**：
+**停止时机**：对话结束时，在 `start_unified_dialogue` 方法中停止
 
 ```python
-# 构建消息时添加图片
-content = [{"type": "text", "text": question}]
+async def stop_photo_capture_task(self, session_id: str) -> None:
+    """停止定时拍照任务"""
+    if session_id not in self._photo_capture_tasks:
+        return
 
-# 添加多张图片
-for image_base64 in images:
-    content.append({
-        "type": "image_url",
-        "image_url": {
-            "url": f"data:image/jpeg;base64,{image_base64}"
-        }
-    })
+    task = self._photo_capture_tasks[session_id]
+
+    # 取消任务
+    if not task.done():
+        task.cancel()
+        try:
+            await task  # 等待任务完成取消
+        except asyncio.CancelledError:
+            pass  # 预期的取消异常
+
+    # 清理任务引用
+    del self._photo_capture_tasks[session_id]
 ```
 
-### 1.3 图片顺序说明
+### 2.3 拍照流程
 
-在看护模式下，图片顺序很重要：
+```
+对话开始
+  ↓
+看护模式激活？
+  ├─ 是 → 启动定时拍照任务
+  │       ↓
+  │     每5秒循环：
+  │       1. 调用ESP32 MCP工具拍照
+  │       2. 将照片添加到PhotoCacheManager
+  │       3. 自动清理超过10张的旧照片
+  │       4. 等待5秒
+  │       5. 继续循环
+  │
+  └─ 否 → 不启动定时拍照
+
+对话进行中
+  ↓
+每轮对话：
+  - 从PhotoCacheManager获取最新缓存照片
+  - 如果缓存为空，使用初次访客照片
+  - 传入VLLM进行分析
+
+对话结束
+  ↓
+停止定时拍照任务
+  ↓
+对话结束后处理：
+  - 获取最后一张缓存照片（用于快递状态检查）
+  - 如果缓存为空，重新拍照
+  ↓
+清理照片缓存
+```
+
+### 2.4 照片时间戳
+
+**照片缓存中的时间戳**：
 
 ```python
-# 看护监控分析
-return self.analyze_with_tools(
-    question="请对比当前图片和基准图片...",
-    images=[baseline_image, current_image],  # 基准图片在前，当前图片在后
-    dialogue_history=dialogue_history,
-    system_prompt=system_prompt
+# PhotoCacheManager中每张照片都有时间戳
+photo_entry = {
+    'photo': photo_base64,
+    'timestamp': datetime.now()  # 拍照时间
+}
+```
+
+**用途**：
+
+- 记录拍照时间
+- 用于日志和调试
+- 不传递给 VLLM（VLLM 只接收 Base64 图片）
+
+---
+
+## 3. 统一模式对话流程
+
+### 3.1 start_unified_dialogue 方法
+
+**功能**：启动统一模式对话（支持看护）
+
+**方法签名**：
+
+```python
+async def start_unified_dialogue(
+    self,
+    device_id: str,
+    session_id: str,
+    person_info: Optional[Dict[str, Any]],
+    visitor_image: bytes,
+    baseline_image: Optional[bytes],
+    conn=None
+) -> Dict[str, Any]
+```
+
+**核心流程**：
+
+```python
+# 保存初次访客照片（用于后续意图总结）
+initial_visitor_image = visitor_image
+
+# 步骤1: 如果看护模式激活，启动定时拍照任务
+if baseline_image:
+    await self.start_photo_capture_task(
+        device_id=device_id,
+        session_id=session_id,
+        conn=conn,
+        interval_seconds=5  # 每5秒拍照一次
+    )
+
+# 步骤2: 播放主动问候
+greeting = await self._play_initial_greeting(device_id, person_info, conn)
+self.session_manager.add_dialogue(session_id, "assistant", greeting)
+
+# 步骤3: 对话循环
+dialogue_count = 0
+is_first_round = True
+
+while dialogue_count < max_rounds:
+    # 检查对话是否应该结束
+    should_end = await self.session_manager.check_dialogue_end(session_id, pir_detected)
+    if should_end:
+        break
+
+    # 等待访客回复（ASR识别）
+    visitor_response = await self._wait_for_visitor_response(device_id, conn)
+    if not visitor_response:
+        await asyncio.sleep(1)
+        continue
+
+    # 添加访客回复到对话历史
+    self.session_manager.add_dialogue(session_id, "user", visitor_response)
+
+    # 从PhotoCacheManager获取最新缓存照片
+    latest_photo = None
+    if baseline_image:
+        latest_photo = self.photo_cache.get_latest_photo(session_id)
+        if not latest_photo:
+            latest_photo = visitor_image  # 回退到初次照片
+    else:
+        latest_photo = visitor_image
+
+    # 调用VLLM统一分析
+    vllm_result = await self.vllm.analyze_unified(
+        visitor_image=latest_photo_base64,
+        baseline_image=baseline_image_base64,
+        dialogue_history=dialogue_history,
+        is_first_round=is_first_round
+    )
+
+    # 播放AI回复
+    ai_response = vllm_result.get("content", "")
+    if ai_response:
+        self.session_manager.add_dialogue(session_id, "assistant", ai_response)
+        await self._play_ai_response(device_id, ai_response, conn)
+
+    # 处理工具调用
+    tool_calls = vllm_result.get("tool_calls", [])
+    if tool_calls:
+        await self._handle_tool_calls(device_id, session_id, tool_calls, conn)
+
+    dialogue_count += 1
+    is_first_round = False
+
+# 步骤4: 对话结束后停止定时拍照任务
+if baseline_image:
+    await self.stop_photo_capture_task(session_id)
+
+# 步骤5: 对话结束后处理
+post_result = await self._post_dialogue_processing(
+    device_id, session_id, initial_visitor_image, baseline_image, dialogue_history, conn
 )
+
+# 步骤6: 清理照片缓存
+if baseline_image:
+    self.photo_cache.clear_cache(session_id)
 ```
 
-**提示词中的说明**：
+### 3.2 照片使用策略
 
-```
-第一张图片是基准图片（之前的状态）
-第二张图片是当前图片（现在的状态）
+**初次访客照片**：
+
+- 在对话开始时拍摄
+- 保存为 `initial_visitor_image`
+- 用于对话结束后的意图总结生成
+
+**缓存照片**：
+
+- 定时拍照任务每5秒拍摄一次
+- 存储在 PhotoCacheManager 中
+- 每轮对话使用最新的缓存照片
+- 对话结束后用于快递状态检查
+
+**照片传递规则**：
+
+| 对话轮次 | 传入VLLM的照片              | 说明                     |
+| -------- | --------------------------- | ------------------------ |
+| 第1轮    | 最新缓存照片 + 基准图片     | 建立基准状态             |
+| 第2-10轮 | 最新缓存照片                | 依赖AI上下文理解         |
+| 对话结束 | 最后缓存照片 + 基准图片     | 最终状态对比（快递检查） |
+| 意图总结 | 初次访客照片 + 完整对话历史 | 生成结构化总结           |
+
+### 3.3 对话结束后处理流程
+
+**\_post_dialogue_processing 方法**：
+
+```python
+async def _post_dialogue_processing(
+    self,
+    device_id: str,
+    session_id: str,
+    visitor_image: bytes,  # 初次访客照片
+    baseline_image: Optional[bytes],
+    dialogue_history: List[Dict[str, str]],
+    conn=None
+) -> Dict[str, Any]:
+    """对话结束后的处理流程"""
+
+    # 步骤1: 检查快递状态（如果看护激活）
+    if baseline_image:
+        # 获取最后一张缓存照片
+        last_photo = self.photo_cache.get_latest_photo(session_id)
+        if not last_photo:
+            # 如果缓存为空，重新拍照
+            last_photo = await self._capture_visitor_photo(device_id, conn)
+
+        if last_photo:
+            # 调用VLLM检查快递状态
+            package_check_result = await self.vllm.final_package_check(
+                current_image=current_image_base64,
+                baseline_image=baseline_image_base64
+            )
+
+            # 如果检测到威胁，保存警报
+            threat_level = package_check_result.get('threat_level', 'low')
+            if threat_level in ['medium', 'high']:
+                # TODO: 保存警报到数据库
+                pass
+
+    # 步骤2: 生成访客意图总结（使用初次访客照片）
+    intent_summary = await self.vllm.generate_intent_summary(
+        visitor_image=visitor_image_base64,
+        dialogue_history=dialogue_history
+    )
+
+    # 步骤3: 保存访问记录
+    visit_id = await self._save_visit_record(
+        session_id, person_info, intent_summary, dialogue_history,
+        visitor_image, package_check_result
+    )
+
+    # 步骤4: 发送App通知
+    await self.notification_service.notify_visitor_intent(
+        visit_id, session_id, person_info, intent_summary, dialogue_history
+    )
+
+    # 步骤5: 清理会话（由调用方负责）
+
+    return {
+        "success": True,
+        "visit_id": visit_id,
+        "intent_summary": intent_summary,
+        "package_check_result": package_check_result
+    }
 ```
 
 ---
 
-## 2. 时间戳机制
-
-### 2.1 是否附加时间戳？
-
-**❌ 照片本身不附加时间戳**
-
-从代码来看，照片只是 Base64 编码的 JPEG 数据，没有额外的时间戳字段。
-
-**但是**，系统在其他地方记录了时间信息：
-
-1. **对话历史中的时间戳**：
-
-   ```python
-   # 每条消息都有时间戳
-   {
-       "role": "user",
-       "content": "有快递",
-       "timestamp": 1702234567890  # 毫秒时间戳
-   }
-   ```
-
-2. **数据库记录中的时间戳**：
-
-   ```python
-   # PackageAlert 模型
-   class PackageAlert:
-       created_at: datetime  # 创建时间
-       photo_path: str       # 照片路径（包含时间信息）
-   ```
-
-3. **会话管理器中的时间戳**：
-   ```python
-   # SessionManager 记录会话时间
-   session = {
-       "session_id": "...",
-       "start_time": datetime.now(),
-       "last_activity": datetime.now()
-   }
-   ```
-
-### 2.2 时间信息的使用
-
-虽然照片本身没有时间戳，但系统通过以下方式关联时间：
-
-1. **对话上下文**：AI 可以从对话历史中推断时间顺序
-2. **文件命名**：照片保存时使用时间戳命名
-3. **数据库关联**：通过 session_id 关联时间信息
-
----
-
-## 3. Token 限制和管理
+## 4. Token 限制和管理
 
 ### 3.1 图片 Token 消耗
 

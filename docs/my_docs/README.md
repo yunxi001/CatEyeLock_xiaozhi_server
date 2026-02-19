@@ -19,7 +19,7 @@
 - 两级确认机制（esp32_ack + ack）
 - 统一错误码（0-10）
 
-#### 智能猫眼门锁系统-服务器与App通信协议规范-v2.4.md
+#### 智能猫眼门锁系统-服务器与App通信协议规范-v2.5.md
 
 **用途**: App 与服务器之间的 WebSocket 通信协议规范（当前版本）  
 **包含内容**:
@@ -31,6 +31,68 @@
 - 统一错误码规范（0-10）
 - 密码查询接口
 - 媒体文件下载规范
+- 智能门锁AI功能消息类型（v2.5新增）
+  - 访客意图通知（intent_notification）
+  - 快递警报通知（package_alert）
+  - 人脸识别结果推送（face_result）
+
+---
+
+### 🔷 协议升级文档
+
+#### app-protocol-v2.4-update-analysis.md
+
+**用途**: App 协议 v2.4 更新分析报告  
+**包含内容**:
+
+- 协议变更时间线
+- 核心功能变更分析
+- 智能门锁AI功能说明
+- 数据库变更分析
+
+#### app-protocol-v2.5-update-checklist.md
+
+**用途**: App 协议 v2.5 更新检查清单  
+**包含内容**:
+
+- 协议更新任务清单
+- 新增消息类型说明
+- 数据库变更清单
+- 验证清单
+
+#### app-protocol-v2.5-update-checklist-final.md
+
+**用途**: App 协议 v2.5 更新检查清单（最终版）  
+**包含内容**:
+
+- 完整的数据库变更分析
+- 详细的消息类型说明
+- 协议升级验证清单
+- 相关文档更新指引
+
+---
+
+### 🔷 VLLM 实现文档
+
+#### vllm-implementation-analysis.md
+
+**用途**: VLLM 实现分析文档  
+**包含内容**:
+
+- VLLM 提供者实现分析
+- 统一模式设计说明
+- Token 管理机制
+- 图片处理流程
+
+#### vllm-intent-simulation-test-plan.md
+
+**用途**: VLLM 意图模拟测试计划  
+**包含内容**:
+
+- 测试场景设计
+- 测试用例说明
+- 预期结果验证
+- 测试执行指南
 
 ---
 
@@ -263,7 +325,9 @@
 | 需求                   | 推荐文档                                             |
 | ---------------------- | ---------------------------------------------------- |
 | ESP32 如何与服务器通信 | `智能猫眼门锁系统-ESP32与服务器通信协议规范-v5.2.md` |
-| App 如何与服务器通信   | `智能猫眼门锁系统-服务器与App通信协议规范-v2.4.md`   |
+| App 如何与服务器通信   | `智能猫眼门锁系统-服务器与App通信协议规范-v2.5.md`   |
+| App 协议升级指南       | `app-protocol-v2.5-update-checklist-final.md`        |
+| App 协议变更分析       | `app-protocol-v2.4-update-analysis.md`               |
 | 服务器架构设计         | `智能猫眼门锁系统-服务器端架构说明.md`               |
 | ESP32 数据处理流程     | `esp32-data-processing-flow.md`                      |
 | ESP32 数据处理详细分析 | `esp32-data-processing-detailed-analysis.md`         |
@@ -272,9 +336,16 @@
 | seq_id 如何使用        | `seq_id使用规范与注意事项.md`                        |
 | App 离线连接机制       | `app-offline-connection-README.md`                   |
 | 门锁 AI 功能 API       | `doorlock-api-documentation.md`                      |
+| 门锁配置指南           | `doorlock-configuration-guide.md`                    |
+| 门锁故障排查           | `doorlock-troubleshooting-guide.md`                  |
+| 门锁提示词自定义       | `doorlock-prompt-customization-guide.md`             |
+| 统一模式使用指南       | `unified-mode-user-guide.md`                         |
+| 统一模式迁移指南       | `unified-mode-migration-guide.md`                    |
 | 视觉拍照功能           | `esp32-vision-guide.md`                              |
 | MCP Vision 详细分析    | `mcp-vision-detailed-analysis.md`                    |
 | VLLM 连续对话          | `vllm-continuous-dialogue-implementation.md`         |
+| VLLM 实现分析          | `vllm-implementation-analysis.md`                    |
+| VLLM 测试计划          | `vllm-intent-simulation-test-plan.md`                |
 | Dialogue 类使用        | `dialogue-class-explanation.md`                      |
 | 项目变更历史           | `CHANGELOG.md`                                       |
 

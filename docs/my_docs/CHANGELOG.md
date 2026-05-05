@@ -8897,3 +8897,165 @@ python run_all_unit_tests.py
 
 - [统一对话实现总结](./unified-dialogue-implementation-summary.md)
 - [集成测试总结](./integration-test-summary.md)
+
+---
+
+## 2026-05-04
+
+### 本地预览功能控制插件实现
+
+#### 修改文件
+
+- `main/xiaozhi-server/plugins_func/functions/control_local_preview.py`（新增）
+
+#### 修改位置
+
+- 新增完整的本地预览功能控制插件文件（262 行代码）
+
+#### 修改时间
+
+- 2026-05-04
+
+#### 变更内容
+
+**1. 插件核心功能**：
+
+- 定义 Function Schema 供 LLM 意图识别使用
+- 实现 `control_local_preview` 主函数（使用 `@register_function` 装饰器注册）
+- 支持 `start` 和 `stop` 两种操作类型
+- 完整的参数验证和 WebSocket 连接检查
+
+**2. WebSocket 命令处理**：
+
+- 构建符合协议的 `local_preview` 消息（包含 `type` 和 `action` 字段）
+- 通过 `conn.websocket.send()` 发送 JSON 命令到 ESP32
+- 实现 `_wait_for_response` 异步等待机制（轮询检查响应缓存，10 秒超时）
+- 使用连接对象的 `_local_preview_response` 属性作为响应缓存
+
+**3. 响应解析和反馈**：
+
+- 实现 `_parse_response` 方法解析 ESP32 响应
+- 支持 `success` 和 `error` 两种状态
+- 错误码映射表（7 种错误类型）：
+  - `Camera not available` → "摄像头暂时不可用"
+  - `Monitor mode active` → "监控模式正在运行，无法启动本地预览"
+  - `Face recognition active` → "人脸识别正在进行，请稍后再试"
+  - `System error` → "系统错误，请稍后再试"
+  - `timeout` → "操作超时，请稍后再试"
+  - `unknown` → "未知错误，请稍后再试"
+- 成功反馈消息：
+  - `start` → "已打开本地预览"
+  - `stop` → "已关闭本地预览"
+
+**4. 触发词设计**：
+
+- 启动本地预览：'显示监控画面'、'打开监控画面'、'让我看看门口'、'打开本地预览'、'屏幕显示摄像头'、'打开屏幕'、'显示摄像头'
+- 停止本地预览：'关闭监控画面'、'隐藏监控画面'、'关闭本地预览'、'关闭屏幕显示'、'关闭屏幕'、'隐藏摄像头'
+
+**5. 辅助函数**：
+
+- `handle_local_preview_response`：供消息路由调用，用于接收 ESP32 的响应并存储到连接对象缓存
+
+#### 实现功能
+
+**核心功能**：
+
+- 通过语音命令控制 ESP32 的本地预览功能（Local Preview Mode）
+- 支持启动和停止本地预览两种操作
+- 自动识别多种触发词变体（LLM 泛化能力）
+- 提供友好的中文语音反馈
+
+**技术特点**：
+
+- 使用插件系统（`register_function` + `ToolType.SYSTEM_CTL`）
+- 异步编程（`async/await`）
+- 跨协议同步机制（WebSocket 命令 + 轮询等待响应）
+- 完整的错误处理和超时控制（10 秒超时）
+- 详细的日志记录（使用 loguru，中文日志）
+- 返回 `ActionResponse` 对象（`Action.RESPONSE` 类型，直接语音反馈）
+
+**工作流程**：
+
+```
+用户语音输入 → ASR 服务（语音转文字）
+    ↓
+意图识别（intent_llm.py）→ 匹配到 control_local_preview 插件
+    ↓
+插件执行 → 构建 WebSocket 命令 → 发送到 ESP32
+    ↓
+等待响应（轮询 _local_preview_response 缓存，10 秒超时）
+    ↓
+解析响应 → 生成语音反馈文本 → TTS 服务（文字转语音）
+    ↓
+语音输出（服务器 → ESP32）
+```
+
+**协议格式**：
+
+- 发送到 ESP32：`{"type": "local_preview", "action": "start"}`
+- ESP32 响应（成功）：`{"type": "local_preview", "action": "start", "status": "success"}`
+- ESP32 响应（失败）：`{"type": "local_preview", "action": "start", "status": "error", "error": "Camera not available"}`
+
+#### 相关文档
+
+- [本地预览功能服务器端实施计划](../本地预览功能-服务器端实施计划.md)
+- [本地预览功能服务器端与 APP 端配合说明](../本地预览功能-服务器端与APP端配合说明.md)
+- [ESP32 与服务器通信协议规范 v5.2](./智能猫眼门锁系统-ESP32与服务器通信协议规范-v5.2.md)
+
+---
+
+## 2026-05-05
+
+### 修改文件
+
+- `main/xiaozhi-server/core/handle/textHandler/localPreviewHandler.py`
+
+### 修改位置
+
+- `LocalPreviewHandler` 类的构造方法（第 30-32 行）
+
+### 变更内容
+
+- 移除 `__init__` 构造方法
+- 新增 `message_type` 属性方法（使用 `@property` 装饰器）
+- 返回 `TextMessageType.LOCAL_PREVIEW` 消息类型
+
+### 功能说明
+
+重构 `LocalPreviewHandler` 类的消息类型定义方式，从构造方法中调用父类传递消息类型改为使用属性方法返回消息类型。这种方式更符合 Python 的属性访问模式，提升代码的可读性和一致性，与其他 Handler 类的实现风格保持统一。
+
+---
+
+## 2026-05-05
+
+### 本地预览功能触发词优化
+
+#### 修改文件
+
+- `main/xiaozhi-server/plugins_func/functions/control_local_preview.py`
+
+#### 修改位置
+
+- `CONTROL_LOCAL_PREVIEW_DESC` 函数描述字段（第 29-35 行）
+
+#### 变更内容
+
+1. **优化函数描述表述**：
+   - 增加功能说明："当用户想要在设备屏幕上实时显示摄像头画面时调用此函数"
+   - 将"当用户说以下内容时调用此函数"改为更清晰的"触发词"分类
+
+2. **新增触发词**：
+   - 启动本地预览新增："打开监控模式"、"开启实时预览"、"屏幕显示画面"
+   - 停止本地预览新增："关闭监控模式"、"停止实时预览"
+
+3. **增加功能区分说明**：
+   - 新增注意事项："注意：这是在设备屏幕上显示实时画面，不是拍照或录像。"
+   - 帮助 LLM 更准确地区分本地预览与拍照、录像等其他功能
+
+#### 功能说明
+
+增强本地预览功能的语音触发词识别能力，避免与拍照、录像功能混淆。通过优化 LLM Function Schema 的描述，使 AI 能更准确地识别用户意图，支持更多自然语言表达方式（如"打开监控模式"、"开启实时预览"等），提升用户体验和功能可用性。
+
+#### 修改时间
+
+2026-05-05

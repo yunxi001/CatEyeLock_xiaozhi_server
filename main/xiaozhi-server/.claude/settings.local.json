@@ -2,7 +2,16 @@
   "permissions": {
     "allow": [
       "Bash(tree:*)",
-      "Bash(find:*)"
+      "Bash(find:*)",
+      "Bash(cd \"C:\\\\\\\\Users\\\\\\\\yunxi\\\\\\\\Desktop\\\\\\\\graduation_project\\\\\\\\xiaozhi-server\\\\\\\\xiaozhi-esp32-server\\\\\\\\main\\\\\\\\xiaozhi-server\")",
+      "Bash(D:\\\\\\\\Electronic_soft\\\\\\\\anaconda\\\\\\\\envs\\\\\\\\xiaozhi-esp32-server\\\\\\\\python.exe -m pytest test/doorlock/ -v --tb=short)",
+      "Bash(\"D:/Electronic_soft/anaconda/envs/xiaozhi-esp32-server/python.exe\" -m pytest test/doorlock/ -v --tb=short)",
+      "Bash(\"D:/Electronic_soft/anaconda/envs/xiaozhi-esp32-server/python.exe\" --version)",
+      "Bash(\"D:/Electronic_soft/anaconda/envs/xiaozhi-esp32-server/python.exe\" -c \"import sys; print\\(sys.path\\)\")",
+      "Bash(\"D:/Electronic_soft/anaconda/envs/xiaozhi-esp32-server/python.exe\" -m pip install pytest -q)",
+      "Bash(\"D:/Electronic_soft/anaconda/envs/xiaozhi-esp32-server/python.exe\" -c \"from core.handle.textMessageHandlerRegistry import TextMessageHandlerRegistry; r = TextMessageHandlerRegistry\\(\\); print\\('Import OK'\\)\")",
+      "Bash(\"D:/Electronic_soft/anaconda/envs/xiaozhi-esp32-server/python.exe\" -c \"from core.app_connection import AppConnectionHandler; print\\('Import OK'\\)\")",
+      "Bash(timeout 15 D:/Electronic_soft/anaconda/envs/xiaozhi-esp32-server/python.exe -c ' *)"
     ],
     "deny": [],
     "ask": []

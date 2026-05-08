@@ -8,21 +8,17 @@ from core.handle.textHandler.mcpMessageHandler import McpTextMessageHandler
 from core.handle.textMessageHandler import TextMessageHandler
 from core.handle.textHandler.serverMessageHandler import ServerTextMessageHandler
 from core.handle.textHandler.systemMessageHandler import SystemTextMessageHandler
-from core.handle.textHandler.faceRecognitionHandler import FaceRecognitionHandler, FaceManagementHandler
+from core.handle.textHandler.faceRecognitionHandler import FaceRecognitionHandler
 # 智能门锁协议 v5.0 新增处理器
 from core.handle.textHandler.statusReportHandler import StatusReportHandler
 from core.handle.textHandler.eventReportHandler import EventReportHandler
 from core.handle.textHandler.logReportHandler import LogReportHandler
 from core.handle.textHandler.ackHandler import AckHandler
 from core.handle.textHandler.userMgmtResultHandler import UserMgmtResultHandler
-from core.handle.textHandler.heartbeatHandler import HeartbeatHandler
 # 智能门锁协议 v5.2 新增处理器
-from core.handle.textHandler.esp32AckHandler import Esp32AckHandler
 from core.handle.textHandler.doorOpenedReportHandler import DoorOpenedReportHandler
 from core.handle.textHandler.passwordReportHandler import PasswordReportHandler
-# App 协议 v2.2 新增处理器
-from core.handle.textHandler.queryHandler import QueryHandler
-from core.handle.textHandler.mediaDownloadHandler import MediaDownloadHandler, MediaDownloadChunkHandler
+# App 协议 v6.0 命令代理处理器
 from core.handle.textHandler.commandProxyHandler import (
     LockControlProxyHandler,
     DevControlProxyHandler,
@@ -52,22 +48,16 @@ class TextMessageHandlerRegistry:
             ServerTextMessageHandler(),
             SystemTextMessageHandler(),
             FaceRecognitionHandler(),
-            FaceManagementHandler(),
             # 智能门锁协议 v5.0 新增
             StatusReportHandler(),
             EventReportHandler(),
             LogReportHandler(),
             AckHandler(),
             UserMgmtResultHandler(),
-            HeartbeatHandler(),
             # 智能门锁协议 v5.2 新增
-            Esp32AckHandler(),
             DoorOpenedReportHandler(),
             PasswordReportHandler(),
-            # App 协议 v2.2 新增
-            QueryHandler(),
-            MediaDownloadHandler(),
-            MediaDownloadChunkHandler(),
+            # App 协议 v6.0 命令代理
             LockControlProxyHandler(),
             DevControlProxyHandler(),
             UserMgmtProxyHandler(),

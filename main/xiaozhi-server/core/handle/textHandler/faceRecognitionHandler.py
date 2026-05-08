@@ -216,7 +216,7 @@ class FaceRecognitionHandler(TextMessageHandler):
             if not app_conns:
                 return
             
-            # 构建通知消息（含图片数据）
+            # 构建通知消息（图片通过 HTTP API 下载，不嵌入 Base64）
             notification = {
                 "type": "visit_notification",
                 "ts": int(time.time() * 1000),
@@ -227,7 +227,6 @@ class FaceRecognitionHandler(TextMessageHandler):
                     "relation": result.person.relation_type if result.person else None,
                     "result": result.result,
                     "access_granted": access_granted,
-                    "image": base64.b64encode(jpeg_data).decode() if jpeg_data else None,
                     "image_path": image_path
                 }
             }
@@ -283,168 +282,3 @@ class FaceRecognitionHandler(TextMessageHandler):
             "status": "error",
             "error": message
         }))
-
-
-class FaceManagementHandler(TextMessageHandler):
-    """处理 App 人脸管理请求"""
-
-    @property
-    def message_type(self) -> TextMessageType:
-        return TextMessageType.FACE_MANAGEMENT
-
-    async def handle(self, conn, msg_json: Dict[str, Any]) -> None:
-        action = msg_json.get("action")
-        
-        handlers = {
-            "register": self._handle_register,
-            "get_persons": self._handle_get_persons,
-            "get_person": self._handle_get_person,
-            "delete_person": self._handle_delete_person,
-            "update_permission": self._handle_update_permission,
-            "get_visits": self._handle_get_visits
-        }
-        
-        handler = handlers.get(action)
-        if handler:
-            await handler(conn, msg_json)
-        else:
-            conn.logger.bind(tag=TAG).warning(f"未知人脸管理动作: {action}")
-            await self._send_response(conn, action, "error", error="unknown_action")
-
-    async def _handle_register(self, conn, msg_json: Dict[str, Any]):
-        """处理人脸录入"""
-        try:
-            face_service = get_face_service(conn.logger)
-            data = msg_json.get("data", {})
-            
-            name = data.get("name")
-            relation_type = data.get("relation_type", "other")
-            images_b64 = data.get("images", [])
-            permission = data.get("permission")
-            
-            if not name or not images_b64:
-                await self._send_response(conn, "register", "error", error="missing_data")
-                return
-            
-            # 解码图像（App 端使用 base64 编码的 JPEG 图像）
-            images = []
-            for img_b64 in images_b64:
-                try:
-                    # App 端直接发送 base64 编码的 JPEG 图像
-                    images.append(base64.b64decode(img_b64))
-                except Exception as e:
-                    conn.logger.bind(tag=TAG).warning(f"图像解码失败: {e}")
-            
-            if not images:
-                await self._send_response(conn, "register", "error", error="invalid_images")
-                return
-            
-            # 录入人脸
-            person_id, error = face_service.register_face(name, relation_type, images, permission)
-            
-            if error:
-                await self._send_response(conn, "register", "error", error=error)
-            else:
-                await self._send_response(conn, "register", "success", person_id=person_id)
-                
-        except Exception as e:
-            conn.logger.bind(tag=TAG).error(f"人脸录入失败: {e}")
-            await self._send_response(conn, "register", "error", error=str(e))
-
-    async def _handle_get_persons(self, conn, msg_json: Dict[str, Any]):
-        """获取人员列表"""
-        try:
-            face_service = get_face_service(conn.logger)
-            persons = face_service.get_persons()
-            await self._send_response(conn, "get_persons", "success", data=persons)
-        except Exception as e:
-            conn.logger.bind(tag=TAG).error(f"获取人员列表失败: {e}")
-            await self._send_response(conn, "get_persons", "error", error=str(e))
-
-    async def _handle_get_person(self, conn, msg_json: Dict[str, Any]):
-        """获取单个人员详情"""
-        try:
-            face_service = get_face_service(conn.logger)
-            data = msg_json.get("data", {})
-            person_id = data.get("person_id")
-            
-            if not person_id:
-                await self._send_response(conn, "get_person", "error", error="missing_person_id")
-                return
-            
-            person = face_service.get_person(person_id)
-            if person:
-                await self._send_response(conn, "get_person", "success", data=person)
-            else:
-                await self._send_response(conn, "get_person", "error", error="person_not_found")
-        except Exception as e:
-            conn.logger.bind(tag=TAG).error(f"获取人员详情失败: {e}")
-            await self._send_response(conn, "get_person", "error", error=str(e))
-
-    async def _handle_delete_person(self, conn, msg_json: Dict[str, Any]):
-        """删除人员"""
-        try:
-            face_service = get_face_service(conn.logger)
-            data = msg_json.get("data", {})
-            person_id = data.get("person_id")
-            
-            if not person_id:
-                await self._send_response(conn, "delete_person", "error", error="missing_person_id")
-                return
-            
-            success = face_service.delete_person(person_id)
-            if success:
-                await self._send_response(conn, "delete_person", "success")
-            else:
-                await self._send_response(conn, "delete_person", "error", error="delete_failed")
-        except Exception as e:
-            conn.logger.bind(tag=TAG).error(f"删除人员失败: {e}")
-            await self._send_response(conn, "delete_person", "error", error=str(e))
-
-    async def _handle_update_permission(self, conn, msg_json: Dict[str, Any]):
-        """更新权限"""
-        try:
-            face_service = get_face_service(conn.logger)
-            data = msg_json.get("data", {})
-            person_id = data.get("person_id")
-            permission = data.get("permission")
-            
-            if not person_id or not permission:
-                await self._send_response(conn, "update_permission", "error", error="missing_data")
-                return
-            
-            success = face_service.update_permission(person_id, permission)
-            if success:
-                await self._send_response(conn, "update_permission", "success")
-            else:
-                await self._send_response(conn, "update_permission", "error", error="update_failed")
-        except Exception as e:
-            conn.logger.bind(tag=TAG).error(f"更新权限失败: {e}")
-            await self._send_response(conn, "update_permission", "error", error=str(e))
-
-    async def _handle_get_visits(self, conn, msg_json: Dict[str, Any]):
-        """获取到访记录"""
-        try:
-            face_service = get_face_service(conn.logger)
-            data = msg_json.get("data", {})
-            
-            page = data.get("page", 1)
-            page_size = data.get("page_size", 20)
-            date_from = data.get("date_from")
-            date_to = data.get("date_to")
-            
-            result = face_service.get_visits(page, page_size, date_from, date_to)
-            await self._send_response(conn, "get_visits", "success", data=result)
-        except Exception as e:
-            conn.logger.bind(tag=TAG).error(f"获取到访记录失败: {e}")
-            await self._send_response(conn, "get_visits", "error", error=str(e))
-
-    async def _send_response(self, conn, action: str, status: str, **kwargs):
-        """发送响应"""
-        response = {
-            "type": "face_management",
-            "action": action,
-            "status": status
-        }
-        response.update(kwargs)
-        await conn.websocket.send(json.dumps(response))

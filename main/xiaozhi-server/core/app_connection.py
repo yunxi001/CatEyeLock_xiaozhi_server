@@ -1,10 +1,9 @@
 """
 App 端连接处理器
 
-协议版本: v2.2
+协议版本: v6.0
 - 支持 app_id 身份标识
-- 支持 server_ack 消息确认机制
-- 支持 seq_id 防重放
+- hello 认证成功后返回 JWT token（供 HTTP API 认证）
 """
 import json
 import time
@@ -15,16 +14,13 @@ from config.logger import setup_logging
 from core.connection_manager import ConnectionManager
 from core.handle.textHandle import handleTextMessage
 from core.utils.opus_encoder_utils import OpusEncoderUtils
-from core.utils.seq_id_cache import SeqIdCache
+from core.utils.auth import AuthToken
 
 TAG = __name__
 
 
 class AppConnectionHandler:
     """App 端连接处理器"""
-    
-    # 类级别的 seq_id 缓存（所有连接共享）
-    _seq_id_cache = SeqIdCache(max_size=100)
 
     def __init__(self, config: Dict[str, Any]):
         self.config = config
@@ -37,6 +33,10 @@ class AppConnectionHandler:
         
         # OPUS 编码器，用于将 App 发送的 PCM 音频编码为 OPUS
         self.opus_encoder = None
+
+        # JWT token 生成器（用于 HTTP API 认证）
+        auth_key = config.get("server", {}).get("auth_key", "")
+        self.auth = AuthToken(auth_key) if auth_key else None
 
     async def handle_connection(self, ws):
         """处理 App WebSocket 连接"""
@@ -113,19 +113,24 @@ class AppConnectionHandler:
             esp32_conn = manager.get_esp32_conn(device_id)
             current_mode = getattr(esp32_conn, "current_mode", "normal") if esp32_conn else "normal"
 
+            # 生成 JWT token（供 App 后续 HTTP API 请求认证使用）
+            token = None
+            if self.auth:
+                token = self.auth.generate_token(self.device_id)
+
             # 发送成功响应（无论设备是否在线都允许连接）
-            await self.websocket.send(
-                json.dumps(
-                    {
-                        "type": "hello",
-                        "status": "ok",
-                        "device_info": {
-                            "online": is_online,
-                            "mode": current_mode
-                        },
-                    }
-                )
-            )
+            response = {
+                "type": "hello",
+                "status": "ok",
+                "device_info": {
+                    "online": is_online,
+                    "mode": current_mode
+                },
+            }
+            if token:
+                response["token"] = token
+
+            await self.websocket.send(json.dumps(response))
 
             self.logger.bind(tag=TAG).info(
                 f"App 认证成功: device_id={device_id}, app_id={app_id}, "
@@ -219,34 +224,22 @@ class AppConnectionHandler:
 
     async def _handle_text_message(self, message: str):
         """处理文本消息
-        
-        协议 v2.2:
-        - 所有消息统一走 Handler 处理
-        - 支持 seq_id 防重放
-        - 返回 server_ack 确认
+
+        协议 v6.0:
+        - 不再检查 seq_id 防重放
+        - 不再发送 server_ack
         """
         try:
             msg_json = json.loads(message)
-            seq_id = msg_json.get("seq_id")
             msg_type = msg_json.get("type")
-            
-            # 如果有 seq_id，进行防重放检查并返回 server_ack
-            if seq_id:
-                # 检查是否重复消息
-                if not self._seq_id_cache.check_and_add(self.app_id, seq_id):
-                    await self._send_server_ack(seq_id, code=5, msg="重复消息")
-                    self.logger.bind(tag=TAG).debug(f"忽略重复消息: seq_id={seq_id}")
-                    return
-                
-                # 先发送 ACK 确认收到
-                await self._send_server_ack(seq_id, code=0, msg="已接收")
-            
-            # 处理特殊消息类型
-            if msg_type == "get_device_status":
-                # App 请求获取设备状态
-                await self._handle_get_device_status(seq_id)
+
+            # 认证检查（非hello消息需要先认证）
+            if msg_type != "hello" and not self.authenticated:
+                await self.websocket.send(json.dumps({
+                    "type": "error", "message": "请先认证"
+                }))
                 return
-            
+
             # 统一使用 Handler 处理消息
             await handleTextMessage(self, message)
 
@@ -303,31 +296,8 @@ class AppConnectionHandler:
         except Exception as e:
             self.logger.bind(tag=TAG).error(f"处理 App 音频失败: {e}")
 
-    async def _send_server_ack(self, seq_id: str, code: int, msg: str):
-        """发送服务器 ACK 确认
-        
-        Args:
-            seq_id: App 发送的消息序列号
-            code: 状态码（0=成功, 1=设备离线, 2=参数错误, 3=未认证, 4=内部错误, 5=重复消息）
-            msg: 状态描述
-        """
-        try:
-            await self.websocket.send(json.dumps({
-                "type": "server_ack",
-                "seq_id": seq_id,
-                "code": code,
-                "msg": msg,
-                "ts": int(time.time() * 1000)
-            }))
-        except Exception as e:
-            self.logger.bind(tag=TAG).error(f"发送 server_ack 失败: {e}")
-
-    async def _handle_get_device_status(self, seq_id: str = None):
-        """处理获取设备状态请求
-        
-        Args:
-            seq_id: 消息序列号（可选）
-        """
+    async def _handle_get_device_status(self):
+        """处理获取设备状态请求"""
         try:
             manager = ConnectionManager.get_instance()
             esp32_conn = manager.get_esp32_conn(self.device_id)
@@ -335,9 +305,9 @@ class AppConnectionHandler:
             
             self.logger.bind(tag=TAG).info(
                 f"处理设备状态查询: device_id={self.device_id}, "
-                f"app_id={self.app_id}, seq_id={seq_id}, 设备在线={is_online}"
+                f"app_id={self.app_id}, 设备在线={is_online}"
             )
-            
+
             # 构建设备状态信息
             status_data = {
                 "type": "device_status_response",
@@ -345,10 +315,7 @@ class AppConnectionHandler:
                 "device_id": self.device_id,
                 "online": is_online,
             }
-            
-            if seq_id:
-                status_data["seq_id"] = seq_id
-            
+
             # 如果设备在线，获取更多状态信息
             if esp32_conn:
                 status_data["mode"] = getattr(esp32_conn, "current_mode", "normal")

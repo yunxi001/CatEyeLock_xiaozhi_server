@@ -8,6 +8,8 @@ from core.api.doorlock_config_handler import DoorlockConfigHandler
 from core.api.doorlock_guard_handler import DoorlockGuardHandler
 from core.api.doorlock_welcome_handler import DoorlockWelcomeHandler
 from core.api.doorlock_history_handler import DoorlockHistoryHandler
+from core.api.doorlock_api_handler import DoorlockApiHandler
+from core.api.doorlock_media_handler import DoorlockMediaHandler
 
 TAG = __name__
 
@@ -30,6 +32,8 @@ class SimpleHttpServer:
         self.doorlock_guard_handler = DoorlockGuardHandler(config)
         self.doorlock_welcome_handler = DoorlockWelcomeHandler(config)
         self.doorlock_history_handler = DoorlockHistoryHandler(config)
+        self.doorlock_api_handler = DoorlockApiHandler(config)
+        self.doorlock_media_handler = DoorlockMediaHandler(config)
     
     @classmethod
     def get_instance(cls):
@@ -105,6 +109,28 @@ class SimpleHttpServer:
                     web.get("/api/doorlock/alerts/history", self.doorlock_history_handler.handle_get_alerts),
                     web.options("/api/doorlock/intents/history", self.doorlock_history_handler.handle_options),
                     web.options("/api/doorlock/alerts/history", self.doorlock_history_handler.handle_options),
+                    # 门锁核心 API (v6.0 第一阶段)
+                    web.get("/api/doorlock/status", self.doorlock_api_handler.handle_get_status),
+                    web.options("/api/doorlock/status", self.doorlock_api_handler.handle_options),
+                    web.get("/api/doorlock/faces", self.doorlock_api_handler.handle_get_faces),
+                    web.post("/api/doorlock/faces", self.doorlock_api_handler.handle_post_faces),
+                    web.delete("/api/doorlock/faces/{face_id}", self.doorlock_api_handler.handle_delete_face),
+                    web.put("/api/doorlock/faces/{face_id}/permission", self.doorlock_api_handler.handle_update_permission),
+                    web.options("/api/doorlock/faces", self.doorlock_api_handler.handle_options),
+                    web.get("/api/doorlock/visits", self.doorlock_api_handler.handle_get_visits),
+                    web.options("/api/doorlock/visits", self.doorlock_api_handler.handle_options),
+                    # 门锁核心 API (v6.0 第二阶段) — 数据查询
+                    web.get("/api/doorlock/events", self.doorlock_api_handler.handle_get_events),
+                    web.options("/api/doorlock/events", self.doorlock_api_handler.handle_options),
+                    web.get("/api/doorlock/unlock_logs", self.doorlock_api_handler.handle_get_unlock_logs),
+                    web.options("/api/doorlock/unlock_logs", self.doorlock_api_handler.handle_options),
+                    web.get("/api/doorlock/password", self.doorlock_api_handler.handle_get_password),
+                    web.options("/api/doorlock/password", self.doorlock_api_handler.handle_options),
+                    # 门锁核心 API (v6.0 第二阶段) — 媒体文件下载
+                    web.get("/api/doorlock/media", self.doorlock_media_handler.handle_get_list),
+                    web.options("/api/doorlock/media", self.doorlock_media_handler.handle_options),
+                    web.get("/api/doorlock/media/{file_id}", self.doorlock_media_handler.handle_download),
+                    web.get("/api/doorlock/media/download", self.doorlock_media_handler.handle_download_by_path),
                 ]
             )
 

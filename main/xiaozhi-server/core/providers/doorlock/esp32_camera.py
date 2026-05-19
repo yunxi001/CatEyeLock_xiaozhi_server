@@ -79,10 +79,11 @@ class ESP32CameraService:
                 )
                 return None
             
-            # 检查是否有capture_image工具
-            if not conn.mcp_client.has_tool('capture_image'):
+            # 检查是否有capture_image工具（ESP32端工具名为 self.camera.take_photo，sanitize后为 self_camera_take_photo）
+            tool_name = 'self_camera_take_photo'
+            if not conn.mcp_client.has_tool(tool_name):
                 self.logger.bind(tag=TAG).error(
-                    f"设备 {device_id} 不支持capture_image工具"
+                    f"设备 {device_id} 不支持拍照工具（已检查: {tool_name}）"
                 )
                 return None
             
@@ -119,33 +120,30 @@ class ESP32CameraService:
                 device_id, upload_callback
             )
             
-            # 3. 通过MCP调用capture_image工具
+            # 3. 通过MCP调用拍照工具（不等待结果，只需要触发ESP32拍照）
             from core.providers.tools.device_mcp import call_mcp_tool
             
-            try:
-                # 调用MCP工具（这会发送拍照请求给ESP32）
-                # 注意：call_mcp_tool返回的是文本结果，不是照片
-                mcp_result = await call_mcp_tool(
-                    conn=conn,
-                    mcp_client=conn.mcp_client,
-                    tool_name='capture_image',
-                    args=json.dumps({"question": question}),
-                    timeout=timeout
-                )
-                
-                self.logger.bind(tag=TAG).debug(
-                    f"MCP拍照请求已发送 - 设备: {device_id}, "
-                    f"MCP返回: {mcp_result}"
-                )
-                
-            except Exception as e:
-                self.logger.bind(tag=TAG).error(
-                    f"MCP拍照请求失败 - 设备: {device_id}, 错误: {e}"
-                )
-                # 清理并返回
-                self.pending_captures.pop(device_id, None)
-                http_server.image_upload_handler.unregister_callback(device_id)
-                return None
+            async def _send_mcp_capture():
+                """异步发送MCP拍照请求（不阻塞主流程）"""
+                try:
+                    await call_mcp_tool(
+                        conn=conn,
+                        mcp_client=conn.mcp_client,
+                        tool_name='self_camera_take_photo',
+                        args=json.dumps({"question": question}),
+                        timeout=timeout
+                    )
+                except Exception as e:
+                    self.logger.bind(tag=TAG).debug(
+                        f"MCP拍照工具返回异常（不影响图片获取）- 设备: {device_id}, 错误: {e}"
+                    )
+            
+            # 异步发送拍照请求，不阻塞等待结果
+            asyncio.create_task(_send_mcp_capture())
+            
+            self.logger.bind(tag=TAG).debug(
+                f"MCP拍照请求已发送（异步）- 设备: {device_id}"
+            )
             
             # 4. 等待照片上传（带超时）
             try:

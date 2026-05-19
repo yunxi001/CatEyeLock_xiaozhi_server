@@ -95,7 +95,8 @@ class GreetingHandler:
         self, 
         device_id: str, 
         person_id: int,
-        person_name: Optional[str] = None
+        person_name: Optional[str] = None,
+        conn=None
     ) -> bool:
         """播放欢迎词
         
@@ -103,6 +104,7 @@ class GreetingHandler:
             device_id: 设备ID
             person_id: 人员ID
             person_name: 人员姓名（可选，用于日志）
+            conn: 连接对象（用于 TTS 播放）
             
         Returns:
             是否成功播放
@@ -134,18 +136,34 @@ class GreetingHandler:
                 f"内容: {greeting_text}"
             )
             
-            # 生成并播放语音
-            audio_data = await self._generate_tts(greeting_text)
-            if audio_data:
-                # TODO: 发送音频到设备
-                # 这里需要集成实际的音频发送逻辑
-                logger.bind(tag=TAG).debug(
-                    f"欢迎词语音已生成 - 设备: {device_id}"
-                )
+            # 通过设备连接播放 TTS（遵循正常对话流程：FIRST → MIDDLE → LAST）
+            if conn and hasattr(conn, 'tts') and conn.tts:
+                from core.providers.tts.dto.dto import ContentType, SentenceType, TTSMessageDTO
+                import uuid
+                
+                sentence_id = str(uuid.uuid4().hex)
+                conn.sentence_id = sentence_id
+                
+                conn.tts.tts_text_queue.put(TTSMessageDTO(
+                    sentence_id=sentence_id,
+                    sentence_type=SentenceType.FIRST,
+                    content_type=ContentType.ACTION,
+                ))
+                conn.tts.tts_text_queue.put(TTSMessageDTO(
+                    sentence_id=sentence_id,
+                    sentence_type=SentenceType.MIDDLE,
+                    content_type=ContentType.TEXT,
+                    content_detail=greeting_text,
+                ))
+                conn.tts.tts_text_queue.put(TTSMessageDTO(
+                    sentence_id=sentence_id,
+                    sentence_type=SentenceType.LAST,
+                    content_type=ContentType.ACTION,
+                ))
                 return True
             else:
-                logger.bind(tag=TAG).error(
-                    f"欢迎词语音生成失败 - 设备: {device_id}"
+                logger.bind(tag=TAG).warning(
+                    f"无法播放欢迎词：连接对象无 TTS 实例 - 设备: {device_id}"
                 )
                 return False
                 

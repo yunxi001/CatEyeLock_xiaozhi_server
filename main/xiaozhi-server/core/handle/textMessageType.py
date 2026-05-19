@@ -35,6 +35,3 @@ class TextMessageType(Enum):
     LOCK_CONTROL = "lock_control"          # 锁控命令
     DEV_CONTROL = "dev_control"            # 设备控制命令
     USER_MGMT = "user_mgmt"                # 用户管理命令
-    
-    # 本地预览功能（v5.2 协议扩展）
-    LOCAL_PREVIEW = "local_preview"        # 本地预览控制响应

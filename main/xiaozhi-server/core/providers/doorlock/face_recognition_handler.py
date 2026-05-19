@@ -33,6 +33,7 @@ class FaceRecognitionHandler:
         self, 
         device_id: str, 
         jpeg_data: bytes,
+        conn=None,  # 新增参数：连接对象，用于检查PIR状态
         max_retries: Optional[int] = None
     ) -> Dict[str, Any]:
         """人脸识别（支持重试）
@@ -40,6 +41,7 @@ class FaceRecognitionHandler:
         Args:
             device_id: 设备ID
             jpeg_data: JPEG 图像数据
+            conn: 连接对象（可选），用于检查PIR状态
             max_retries: 最大重试次数，默认使用配置值
             
         Returns:
@@ -48,11 +50,13 @@ class FaceRecognitionHandler:
                 "success": bool,  # 是否识别成功
                 "person_id": int or None,  # 人员ID
                 "person": Person or None,  # 人员对象
-                "result": str,  # 识别结果: "known", "unknown", "no_face"
+                "result": str,  # 识别结果: "known", "unknown", "no_face", "pir_interrupted"
                 "confidence": float,  # 置信度
                 "attempts": int  # 尝试次数
             }
         """
+        from core.utils.pir_utils import is_pir_timeout
+        
         if max_retries is None:
             max_retries = self.max_retries
         
@@ -61,12 +65,74 @@ class FaceRecognitionHandler:
         )
         
         for attempt in range(1, max_retries + 1):
-            logger.bind(tag=TAG).debug(
-                f"人脸识别尝试 {attempt}/{max_retries} - 设备: {device_id}"
+            # 每次重试前检查PIR状态（优化：人离开时及时中止）
+            if conn and hasattr(conn, 'last_pir_time'):
+                if is_pir_timeout(conn, timeout=2.0):
+                    logger.bind(tag=TAG).info(
+                        f"PIR超时，人体已离开，中止识别 - "
+                        f"设备: {device_id}, 尝试次数: {attempt-1}/{max_retries}"
+                    )
+                    return {
+                        "success": False,
+                        "person_id": None,
+                        "person": None,
+                        "result": "pir_interrupted",
+                        "confidence": 0.0,
+                        "attempts": attempt - 1
+                    }
+            
+            # 重试时重新拍照（第一次使用传入的照片）
+            current_jpeg = jpeg_data
+            if attempt > 1 and conn:
+                logger.bind(tag=TAG).info(
+                    f"重试拍照 - 设备: {device_id}, 尝试: {attempt}/{max_retries}"
+                )
+                try:
+                    from core.providers.doorlock.esp32_camera import ESP32CameraService
+                    camera_service = ESP32CameraService(config={}, logger_instance=logger)
+                    new_photo = await camera_service.capture_image(
+                        device_id=device_id,
+                        conn=conn,
+                        question="人脸识别重试拍照",
+                        timeout=10
+                    )
+                    if new_photo:
+                        current_jpeg = new_photo
+                        logger.bind(tag=TAG).info(
+                            f"重试拍照成功 - 设备: {device_id}, "
+                            f"大小: {len(new_photo)} bytes"
+                        )
+                    else:
+                        logger.bind(tag=TAG).warning(
+                            f"重试拍照失败，使用上一张照片 - 设备: {device_id}"
+                        )
+                except Exception as e:
+                    logger.bind(tag=TAG).warning(
+                        f"重试拍照异常，使用上一张照片 - 设备: {device_id}, 错误: {e}"
+                    )
+            
+            logger.bind(tag=TAG).info(
+                f"人脸识别尝试 {attempt}/{max_retries} - 设备: {device_id}, "
+                f"照片大小: {len(current_jpeg)} bytes"
             )
             
+            # 保存照片到磁盘（用于调试和回溯）
+            try:
+                from pathlib import Path
+                from datetime import datetime
+                save_dir = Path("data/face_recognition/visits") / datetime.now().strftime("%Y-%m")
+                save_dir.mkdir(parents=True, exist_ok=True)
+                ts_str = datetime.now().strftime("%Y%m%d_%H%M%S")
+                filename = f"pir_{device_id.replace(':', '')}_{ts_str}_attempt{attempt}.jpg"
+                filepath = save_dir / filename
+                with open(filepath, 'wb') as f:
+                    f.write(current_jpeg)
+                logger.bind(tag=TAG).info(f"照片已保存: {filepath}")
+            except Exception as e:
+                logger.bind(tag=TAG).warning(f"保存照片失败: {e}")
+            
             # 调用人脸识别服务
-            result = self.face_service.recognize(jpeg_data)
+            result = self.face_service.recognize(current_jpeg)
             
             # 识别成功
             if result.result == 'known' and result.person:
@@ -92,9 +158,11 @@ class FaceRecognitionHandler:
                 f"尝试: {attempt}/{max_retries}"
             )
             
-            # 第一次失败时播放语音提示
+            # 第一次失败时记录日志（ESP32 尚未唤醒，不播放语音）
             if attempt == 1:
-                await self._play_retry_prompt(device_id)
+                logger.bind(tag=TAG).info(
+                    f"人脸识别第一次失败，继续重试 - 设备: {device_id}"
+                )
             
             # 如果还有重试机会，等待后继续
             if attempt < max_retries:
@@ -103,8 +171,10 @@ class FaceRecognitionHandler:
                 )
                 await asyncio.sleep(self.retry_interval)
             else:
-                # 三次都失败，播放最终失败提示
-                await self._play_final_failure_prompt(device_id)
+                # 三次都失败，记录日志（语音提示在 start_listening 之后由对话流程处理）
+                logger.bind(tag=TAG).info(
+                    f"人脸识别最终失败，将进入意图对话 - 设备: {device_id}"
+                )
         
         # 所有尝试都失败
         logger.bind(tag=TAG).error(
@@ -121,70 +191,44 @@ class FaceRecognitionHandler:
             "attempts": max_retries
         }
     
-    async def _play_retry_prompt(self, device_id: str):
-        """播放重试提示语音
+    async def _play_tts(self, conn, text: str):
+        """通过设备连接播放 TTS 语音（遵循正常对话流程）
         
         Args:
-            device_id: 设备ID
+            conn: 连接对象（持有 tts 实例）
+            text: 要播放的文本
         """
-        prompt_text = "人脸识别失败，请正视摄像头重试"
-        logger.bind(tag=TAG).info(
-            f"播放重试提示 - 设备: {device_id}, 内容: {prompt_text}"
-        )
-        
         try:
-            # 调用 TTS 服务生成语音
-            audio_data = await self._generate_tts(prompt_text)
-            if audio_data:
-                # TODO: 发送音频到设备
-                # 这里需要集成实际的音频发送逻辑
-                logger.bind(tag=TAG).debug(
-                    f"重试提示语音已生成 - 设备: {device_id}"
+            if not conn or not hasattr(conn, 'tts') or not conn.tts:
+                logger.bind(tag=TAG).warning(
+                    f"无法播放语音：连接对象无 TTS 实例"
                 )
-        except Exception as e:
-            logger.bind(tag=TAG).error(
-                f"播放重试提示失败 - 设备: {device_id}, 错误: {e}"
-            )
-    
-    async def _play_final_failure_prompt(self, device_id: str):
-        """播放最终失败提示语音
-        
-        Args:
-            device_id: 设备ID
-        """
-        prompt_text = "人脸识别失败，请使用其他方式解锁"
-        logger.bind(tag=TAG).info(
-            f"播放最终失败提示 - 设备: {device_id}, 内容: {prompt_text}"
-        )
-        
-        try:
-            # 调用 TTS 服务生成语音
-            audio_data = await self._generate_tts(prompt_text)
-            if audio_data:
-                # TODO: 发送音频到设备
-                # 这里需要集成实际的音频发送逻辑
-                logger.bind(tag=TAG).debug(
-                    f"最终失败提示语音已生成 - 设备: {device_id}"
-                )
-        except Exception as e:
-            logger.bind(tag=TAG).error(
-                f"播放最终失败提示失败 - 设备: {device_id}, 错误: {e}"
-            )
-    
-    async def _generate_tts(self, text: str) -> Optional[bytes]:
-        """生成 TTS 语音
-        
-        Args:
-            text: 要转换的文本
+                return
             
-        Returns:
-            音频数据（bytes）或 None
-        """
-        try:
-            # 使用 TTS 提供者生成语音
-            # 根据 TTS 提供者的实现，可能返回文件路径或音频数据
-            result = await self.tts_provider.text_to_speak(text, None)
-            return result
+            from core.providers.tts.dto.dto import ContentType, SentenceType, TTSMessageDTO
+            import uuid
+            
+            sentence_id = str(uuid.uuid4().hex)
+            conn.sentence_id = sentence_id
+            
+            # FIRST → MIDDLE → LAST（正常对话流程）
+            conn.tts.tts_text_queue.put(TTSMessageDTO(
+                sentence_id=sentence_id,
+                sentence_type=SentenceType.FIRST,
+                content_type=ContentType.ACTION,
+            ))
+            conn.tts.tts_text_queue.put(TTSMessageDTO(
+                sentence_id=sentence_id,
+                sentence_type=SentenceType.MIDDLE,
+                content_type=ContentType.TEXT,
+                content_detail=text,
+            ))
+            conn.tts.tts_text_queue.put(TTSMessageDTO(
+                sentence_id=sentence_id,
+                sentence_type=SentenceType.LAST,
+                content_type=ContentType.ACTION,
+            ))
+            logger.bind(tag=TAG).info(f"已发送 TTS: {text}")
+            
         except Exception as e:
-            logger.bind(tag=TAG).error(f"TTS 生成失败: {e}")
-            return None
+            logger.bind(tag=TAG).error(f"播放语音失败: {e}")

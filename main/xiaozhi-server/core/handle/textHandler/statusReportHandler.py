@@ -48,59 +48,76 @@ class StatusReportHandler(TextMessageHandler):
             
             battery = data.get("bat")
             lux = data.get("lux")
-            lock_state = data.get("lock", 0)
-            light_state = data.get("light", 0)
+            lock_state = data.get("lock")
+            light_state = data.get("light")
             
-            # 存储到 iot_descriptors（内存缓存）
+            # 检查状态是否变化
+            state_changed = self._check_state_changed(conn, battery, lux, lock_state, light_state)
+            
+            # 更新内存缓存
             if not hasattr(conn, "iot_descriptors"):
                 conn.iot_descriptors = {}
             
             conn.iot_descriptors["smart_doorlock"] = {
                 "battery": battery,
                 "lux": lux,
-                "lock_state": "open" if lock_state == 1 else "closed",
-                "light_state": "on" if light_state == 1 else "off",
+                "lock_state": lock_state,
+                "light_state": light_state,
                 "last_update": ts
             }
             
             conn.logger.bind(tag=TAG).debug(
-                f"状态上报: bat={battery}%, lock={lock_state}"
+                f"状态上报: bat={battery}%, lock={lock_state}, light={light_state}, lux={lux}, changed={state_changed}"
             )
             
             # 持久化到数据库
             await self._save_to_database(conn, battery, lux, lock_state, light_state)
             
-            # 使用新的状态更新机制推送给 App
-            # 更新灯状态
-            if light_state is not None:
-                await conn.update_device_state("light", {
-                    "status": "on" if light_state == 1 else "off"
-                })
-            
-            # 更新门锁状态
-            if lock_state is not None:
-                await conn.update_device_state("door", {
-                    "status": "open" if lock_state == 1 else "closed",
-                    "locked": lock_state == 0
-                })
-            
-            # 更新传感器数据
-            if battery is not None:
-                await conn.update_device_state("sensor", {
-                    "name": "battery",
-                    "value": battery,
-                    "unit": "%"
-                })
-            
-            if lux is not None:
-                await conn.update_device_state("sensor", {
-                    "name": "lux",
-                    "value": lux,
-                    "unit": "lux"
-                })
+            # 只有状态变化时才转发给 App
+            if state_changed:
+                conn.logger.bind(tag=TAG).info(
+                    f"检测到状态变化，转发 status_report 给 App"
+                )
+                await self._forward_to_apps(conn, msg_json)
+            else:
+                conn.logger.bind(tag=TAG).debug(
+                    f"状态未变化，不转发"
+                )
             
         except Exception as e:
             conn.logger.bind(tag=TAG).error(f"处理状态上报失败: {e}")
+    
+    def _check_state_changed(self, conn, battery: int, lux: int, 
+                             lock_state: int, light_state: int) -> bool:
+        """检查状态是否发生变化
+        
+        Args:
+            conn: 连接对象
+            battery: 电量
+            lux: 光照值
+            lock_state: 锁状态
+            light_state: 灯状态
+            
+        Returns:
+            bool: 是否有状态变化
+        """
+        # 如果是第一次上报，认为状态变化
+        if not hasattr(conn, "iot_descriptors") or "smart_doorlock" not in conn.iot_descriptors:
+            return True
+        
+        old_state = conn.iot_descriptors["smart_doorlock"]
+        
+        # 比较各个字段
+        if old_state.get("battery") != battery:
+            return True
+        if old_state.get("lux") != lux:
+            return True
+        if old_state.get("lock_state") != lock_state:
+            return True
+        if old_state.get("light_state") != light_state:
+            return True
+        
+        return False
     
     async def _save_to_database(self, conn, battery: int, lux: int, 
                                  lock_state: int, light_state: int):

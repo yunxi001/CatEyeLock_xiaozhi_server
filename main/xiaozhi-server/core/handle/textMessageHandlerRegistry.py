@@ -28,8 +28,6 @@ from core.handle.textHandler.commandProxyHandler import (
     DevControlProxyHandler,
     UserMgmtProxyHandler
 )
-# 本地预览功能处理器
-from core.handle.textHandler.localPreviewHandler import LocalPreviewHandler
 
 TAG = __name__
 
@@ -71,8 +69,6 @@ class TextMessageHandlerRegistry:
             LockControlProxyHandler(),
             DevControlProxyHandler(),
             UserMgmtProxyHandler(),
-            # 本地预览功能
-            LocalPreviewHandler(),
         ]
 
         for handler in handlers:

@@ -156,9 +156,8 @@ class ConnectionHandler:
         self.load_function_plugin = False
         self.intent_type = "nointent"
 
-        self.timeout_seconds = (
-            int(self.config.get("close_connection_no_voice_time", 120)) + 60
-        )  # 在原来第一道关闭的基础上加60秒，进行二道关闭
+        # 固定设置为999999秒（约11.5天），禁用超时断开
+        self.timeout_seconds = 999999 + 60
         self.timeout_task = None
 
         # {"mcp":true} 表示启用MCP功能
@@ -172,6 +171,12 @@ class ConnectionHandler:
         
         # 工作模式：normal | monitor
         self.current_mode = "normal"
+        
+        # PIR状态管理（用于访客管理和包裹看守优化）
+        self.pir_detected = False        # 当前是否检测到人体
+        self.last_pir_time = 0           # 最后一次PIR上报时间（毫秒时间戳）
+        self.pir_duration = 0            # 当前人体停留时长（秒）
+        self.visitor_processing = False  # 是否正在处理访客（防重复触发）
 
     async def handle_connection(self, ws):
         try:
@@ -475,7 +480,7 @@ class ConnectionHandler:
             
             self._monitor_frame_count += 1
             
-            # 处理视频帧：直接转发完整的 BinaryProtocol2 帧
+            # 处理视频帧：旋转180°后转发（猫眼摄像头图像倒置）
             if is_video:
                 self._monitor_video_count += 1
                 if self._monitor_video_count <= 2:
@@ -486,10 +491,34 @@ class ConnectionHandler:
                         f"payload={payload_size} bytes, 转发给 {len(app_conns)} 个 App"
                     )
                 
-                # 直接转发完整帧给所有 App
+                # 旋转 JPEG 180°
+                try:
+                    from PIL import Image
+                    import io
+                    payload = data[16:16 + payload_size]
+                    img = Image.open(io.BytesIO(payload))
+                    img_rotated = img.rotate(180)
+                    buf = io.BytesIO()
+                    img_rotated.save(buf, format='JPEG', quality=85)
+                    rotated_payload = buf.getvalue()
+                    
+                    # 重新组装 BinaryProtocol2 帧
+                    new_payload_size = len(rotated_payload)
+                    header = data[0:4]  # version + msg_type
+                    header += data[4:8]  # reserved（分辨率不变）
+                    header += data[8:12]  # timestamp
+                    header += new_payload_size.to_bytes(4, 'big')  # 新的 payload_size
+                    rotated_frame = header + rotated_payload
+                except Exception as e:
+                    # 旋转失败则直接转发原始帧
+                    rotated_frame = data
+                    if self._monitor_video_count <= 2:
+                        self.logger.bind(tag=TAG).warning(f"视频帧旋转失败，使用原始帧: {e}")
+                
+                # 转发旋转后的帧给所有 App
                 for app_conn in app_conns:
                     if app_conn.websocket:
-                        await app_conn.websocket.send(data)
+                        await app_conn.websocket.send(rotated_frame)
                 return
             
             # 处理音频帧：解码 opus 为 PCM 后转发

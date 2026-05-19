@@ -46,6 +46,7 @@ class PackageGuardManager:
         self.vllm_provider = vllm_provider
         self.tts_provider = tts_provider
         self.notification_service = notification_service
+        self.config = config  # 保存完整配置
         
         # 配置参数
         self.photo_interval = config.get('photo_interval', 5)  # 拍照间隔（秒）
@@ -214,12 +215,20 @@ class PackageGuardManager:
             )
             return ""
     
-    async def start_monitoring(self, device_id: str, session_id: str):
-        """启动监控循环
+    async def start_monitoring(self, device_id: str, session_id: str, conn):
+        """启动监控循环（事件驱动模式）
         
         Args:
             device_id: 设备ID
             session_id: 会话ID
+            conn: 连接对象（用于检查PIR状态）
+            
+        说明:
+            优化后的监控模式：
+            1. 等待PIR检测到人体（低功耗等待）
+            2. PIR触发后进入高频监控（每3秒拍照）
+            3. PIR超时（2秒无上报）后退出高频监控
+            4. 返回步骤1，继续等待
         """
         # 如果已经有监控任务在运行，先停止
         if device_id in self._monitoring_tasks:
@@ -227,12 +236,12 @@ class PackageGuardManager:
         
         # 创建监控任务
         task = asyncio.create_task(
-            self._monitoring_loop(device_id, session_id)
+            self._monitoring_loop(device_id, session_id, conn)
         )
         self._monitoring_tasks[device_id] = task
         
         logger.bind(tag=TAG).info(
-            f"启动监控循环: device_id={device_id}, session_id={session_id}"
+            f"启动事件驱动监控循环: device_id={device_id}, session_id={session_id}"
         )
     
     async def stop_monitoring(self, device_id: str):
@@ -270,15 +279,23 @@ class PackageGuardManager:
             )
             return False
     
-    async def _monitoring_loop(self, device_id: str, session_id: str):
-        """监控循环（每5秒拍照并分析）
+    async def _monitoring_loop(self, device_id: str, session_id: str, conn):
+        """监控循环（事件驱动模式）
         
         Args:
             device_id: 设备ID
             session_id: 会话ID
+            conn: 连接对象
+            
+        说明:
+            事件驱动监控流程：
+            1. 等待PIR检测到人体（协程挂起，不消耗资源）
+            2. PIR触发 → 进入高频监控模式（每3秒拍照）
+            3. PIR超时（2秒无上报）→ 退出高频监控
+            4. 返回步骤1
         """
         logger.bind(tag=TAG).info(
-            f"监控循环开始: device_id={device_id}, session_id={session_id}"
+            f"事件驱动监控循环开始: device_id={device_id}, session_id={session_id}"
         )
         
         try:
@@ -290,11 +307,26 @@ class PackageGuardManager:
                     )
                     break
                 
-                # 等待5秒
-                await asyncio.sleep(self.photo_interval)
+                # 步骤1: 等待PIR检测到人体（低功耗等待）
+                logger.bind(tag=TAG).debug(
+                    f"等待PIR检测人体 - 设备: {device_id}"
+                )
+                await self._wait_for_pir_detection(conn)
                 
-                # 拍照并分析
-                await self._capture_and_analyze(device_id, session_id)
+                # 检查看护模式是否仍然激活
+                if not await self.is_active(device_id):
+                    break
+                
+                # 步骤2: PIR触发，进入高频监控模式
+                logger.bind(tag=TAG).info(
+                    f"PIR检测到人体，进入高频监控模式 - 设备: {device_id}"
+                )
+                await self._high_frequency_monitoring(device_id, session_id, conn)
+                
+                # 步骤3: 高频监控结束（PIR超时），返回等待状态
+                logger.bind(tag=TAG).info(
+                    f"PIR超时，人体已离开，返回等待状态 - 设备: {device_id}"
+                )
                 
         except asyncio.CancelledError:
             logger.bind(tag=TAG).info(
@@ -304,6 +336,92 @@ class PackageGuardManager:
             logger.bind(tag=TAG).error(
                 f"监控循环异常: device_id={device_id}, session_id={session_id}, error={e}"
             )
+    
+    async def _wait_for_pir_detection(self, conn):
+        """等待PIR检测到人体（协程挂起，不消耗CPU资源）
+        
+        Args:
+            conn: 连接对象
+            
+        说明:
+            此方法会阻塞直到PIR检测到人体。
+            通过检查 conn.pir_detected 和 PIR超时状态来判断。
+        """
+        from core.utils.pir_utils import check_pir_status
+        
+        while True:
+            # 检查PIR是否检测到人体且未超时
+            if hasattr(conn, 'pir_detected') and conn.pir_detected:
+                if check_pir_status(conn, timeout=2.0):
+                    # PIR正常，人体仍在
+                    logger.bind(tag=TAG).debug(
+                        f"PIR检测到人体 - 设备: {conn.device_id}"
+                    )
+                    return
+            
+            # 等待0.5秒后再次检查（避免过于频繁的检查）
+            await asyncio.sleep(0.5)
+    
+    async def _high_frequency_monitoring(self, device_id: str, session_id: str, conn):
+        """高频监控模式（有人时每3秒拍照分析）
+        
+        Args:
+            device_id: 设备ID
+            session_id: 会话ID
+            conn: 连接对象
+            
+        说明:
+            在PIR检测到人体后进入此模式，每3秒拍照并分析威胁等级。
+            当PIR超时（2秒无上报）时自动退出。
+        """
+        # 从配置读取监控间隔（默认3秒）
+        monitoring_interval = self.config.get('doorlock', {}).get(
+            'package_guard', {}
+        ).get('monitoring_interval', 3)
+        
+        logger.bind(tag=TAG).info(
+            f"开始高频监控 - 设备: {device_id}, 间隔: {monitoring_interval}秒"
+        )
+        
+        while True:
+            # 检查看护模式是否仍然激活
+            if not await self.is_active(device_id):
+                logger.bind(tag=TAG).info(
+                    f"看护模式已关闭，退出高频监控 - 设备: {device_id}"
+                )
+                return
+            
+            # 检查PIR状态（人是否已离开）
+            if not self._check_pir_status(conn):
+                logger.bind(tag=TAG).info(
+                    f"PIR超时，人体已离开，退出高频监控 - 设备: {device_id}"
+                )
+                return
+            
+            # 执行拍照和分析
+            await self._capture_and_analyze(device_id, session_id)
+            
+            # 等待指定间隔
+            await asyncio.sleep(monitoring_interval)
+    
+    def _check_pir_status(self, conn) -> bool:
+        """检查PIR状态（人体是否仍在）
+        
+        Args:
+            conn: 连接对象
+            
+        Returns:
+            True: PIR正常，人体仍在
+            False: PIR超时，人体已离开
+        """
+        from core.utils.pir_utils import check_pir_status
+        
+        # 从配置读取PIR超时阈值（默认2秒）
+        pir_timeout = self.config.get('doorlock', {}).get(
+            'package_guard', {}
+        ).get('pir_timeout', 2.0)
+        
+        return check_pir_status(conn, timeout=pir_timeout)
     
     async def _capture_and_analyze(self, device_id: str, session_id: str):
         """拍照并分析威胁等级

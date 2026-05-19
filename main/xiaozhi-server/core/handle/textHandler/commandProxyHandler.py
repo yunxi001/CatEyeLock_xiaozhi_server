@@ -204,11 +204,18 @@ class LockControlProxyHandler(TextMessageHandler):
             code: 统一错误码（0-10）
         """
         try:
+            # 添加日志记录
+            conn.logger.bind(tag=TAG).warning(
+                f"锁控命令错误: device_id={conn.device_id}, app_id={conn.app_id}, "
+                f"code={code}, message={message}"
+            )
+            
+            # 返回 ack 格式（符合协议）
+            # 注意：需要从原始消息中获取 seq_id
             await conn.websocket.send(json.dumps({
-                "type": "lock_control",
-                "status": "error",
+                "type": "ack",
                 "code": code,
-                "message": message
+                "msg": message
             }))
         except Exception as e:
             conn.logger.bind(tag=TAG).error(f"发送错误响应失败: {e}")
@@ -259,6 +266,19 @@ class DevControlProxyHandler(TextMessageHandler):
             
             # 移除 App 协议特有字段（兼容旧版）
             msg_json.pop("msg_id", None)
+            
+            # 缓存控制命令信息（用于后续构造 status_report）
+            target = msg_json.get("target")
+            action = msg_json.get("action")
+            if target == "light":
+                esp32_conn.last_light_control = {
+                    "ts": int(time.time() * 1000),
+                    "action": action,
+                    "seq_id": seq_id
+                }
+                conn.logger.bind(tag=TAG).debug(
+                    f"缓存灯控制命令: action={action}"
+                )
             
             # 使用重试机制转发命令
             success = await self._forward_with_retry(conn, esp32_conn, msg_json)
@@ -356,11 +376,17 @@ class DevControlProxyHandler(TextMessageHandler):
             code: 统一错误码（0-10）
         """
         try:
+            # 添加日志记录
+            conn.logger.bind(tag=TAG).warning(
+                f"设备控制错误: device_id={conn.device_id}, app_id={conn.app_id}, "
+                f"code={code}, message={message}"
+            )
+            
+            # 返回 ack 格式（符合协议）
             await conn.websocket.send(json.dumps({
-                "type": "dev_control",
-                "status": "error",
+                "type": "ack",
                 "code": code,
-                "message": message
+                "msg": message
             }))
         except Exception as e:
             conn.logger.bind(tag=TAG).error(f"发送错误响应失败: {e}")
@@ -423,6 +449,25 @@ class UserMgmtProxyHandler(TextMessageHandler):
             
             # 移除 App 协议特有字段（兼容旧版）
             msg_json.pop("msg_id", None)
+            
+            # 缓存用户管理命令信息（用于后续保存到数据库）
+            category = msg_json.get("category")
+            command = msg_json.get("command")
+            if command in ["add", "del", "clear"]:
+                esp32_conn.last_user_mgmt_cmd = {
+                    "ts": int(time.time() * 1000),
+                    "category": category,
+                    "command": command,
+                    "user_name": msg_json.get("user_name"),  # App 提供的备注名（可选）
+                    "payload": msg_json.get("payload"),      # App 提供的额外数据
+                    "user_id": msg_json.get("user_id"),      # App 提供的用户 ID
+                    "app_id": conn.app_id,                   # 记录操作者
+                    "seq_id": seq_id
+                }
+                conn.logger.bind(tag=TAG).debug(
+                    f"缓存用户管理命令: category={category}, command={command}, "
+                    f"user_name={msg_json.get('user_name')}, payload={msg_json.get('payload')}"
+                )
             
             # 使用重试机制转发命令
             success = await self._forward_with_retry(conn, esp32_conn, msg_json)
@@ -520,11 +565,18 @@ class UserMgmtProxyHandler(TextMessageHandler):
             code: 统一错误码（0-10）
         """
         try:
+            # 添加日志记录
+            conn.logger.bind(tag=TAG).warning(
+                f"用户管理错误: device_id={conn.device_id}, app_id={conn.app_id}, "
+                f"code={code}, message={message}"
+            )
+            
+            # 返回 user_mgmt_result 格式（符合协议）
             await conn.websocket.send(json.dumps({
-                "type": "user_mgmt",
-                "status": "error",
-                "code": code,
-                "message": message
+                "type": "user_mgmt_result",
+                "result": False,
+                "val": code,
+                "msg": message
             }))
         except Exception as e:
             conn.logger.bind(tag=TAG).error(f"发送错误响应失败: {e}")

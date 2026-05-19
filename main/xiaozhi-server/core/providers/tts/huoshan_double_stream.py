@@ -298,9 +298,12 @@ class TTSProvider(TTSProviderBase):
     async def text_to_speak(self, text, _):
         """发送文本到TTS服务"""
         try:
-            # 建立新连接
+            # 确保连接建立
             if self.ws is None:
-                logger.bind(tag=TAG).warning(f"WebSocket连接不存在，终止发送文本")
+                await self._ensure_connection()
+            
+            if self.ws is None:
+                logger.bind(tag=TAG).warning(f"WebSocket连接建立失败，终止发送文本")
                 return
 
             #  过滤Markdown

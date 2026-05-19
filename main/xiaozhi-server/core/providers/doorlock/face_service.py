@@ -129,9 +129,13 @@ class FaceService:
         return jpeg_data
     
     def _jpeg_to_numpy(self, jpeg_data: bytes) -> np.ndarray:
-        """将 JPEG 数据转换为 numpy 数组"""
-        image = Image.open(io.BytesIO(jpeg_data))
-        return np.array(image.convert('RGB'))
+        """将 JPEG 数据转换为 numpy 数组
+        
+        注意：猫眼摄像头拍摄的图片是倒置的，需要旋转180°
+        """
+        image = Image.open(io.BytesIO(jpeg_data)).convert('RGB')
+        image = image.rotate(180)
+        return np.array(image)
     
     # ==================== 人脸识别 ====================
     

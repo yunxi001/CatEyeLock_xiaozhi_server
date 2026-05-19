@@ -885,14 +885,14 @@ class DoorlockVLLMProvider(VLLMProviderBase):
     
     async def analyze_intent(
         self,
-        visitor_image: str,
+        visitor_image: Optional[str],
         dialogue_history: List[Dict[str, str]],
         system_prompt: Optional[str] = None
     ) -> Dict[str, Any]:
-        """意图识别分析（单图片+对话历史）
+        """意图识别分析（支持带图片或纯文本）
         
         Args:
-            visitor_image: 访客照片（Base64）
+            visitor_image: 访客照片（Base64），None 表示纯文本对话
             dialogue_history: 对话历史
             system_prompt: 意图识别提示词（可选，如果不提供则从配置加载）
             
@@ -901,22 +901,32 @@ class DoorlockVLLMProvider(VLLMProviderBase):
         """
         self.logger.bind(tag=TAG).debug("执行意图识别分析")
         
-        # 检查图片Token限制（1张图片）
-        if not self._check_image_token_limit(1):
-            error_msg = f"图片Token超出限制: 1张图片估算 {self._estimate_image_tokens(1)} tokens > {self.max_image_tokens}"
-            self.logger.bind(tag=TAG).error(error_msg)
-            raise ValueError(error_msg)
-        
         # 如果没有提供提示词，从配置加载
         if not system_prompt:
             system_prompt = self.get_prompt("intent_recognition_prompt")
         
-        return self.analyze_with_tools(
-            question="请根据对话历史和访客照片，识别访客意图。",
-            images=[visitor_image],
-            dialogue_history=dialogue_history,
-            system_prompt=system_prompt
-        )
+        # 根据是否有图片选择不同的调用方式
+        if visitor_image:
+            # 带图片分析（第一轮）
+            if not self._check_image_token_limit(1):
+                error_msg = f"图片Token超出限制: 1张图片估算 {self._estimate_image_tokens(1)} tokens > {self.max_image_tokens}"
+                self.logger.bind(tag=TAG).error(error_msg)
+                raise ValueError(error_msg)
+            
+            return self.analyze_with_tools(
+                question="请根据对话历史和访客照片，识别访客意图。",
+                images=[visitor_image],
+                dialogue_history=dialogue_history,
+                system_prompt=system_prompt
+            )
+        else:
+            # 纯文本对话（后续轮次，不传图片）
+            return self.analyze_with_tools(
+                question="请根据对话历史，继续与访客对话并识别意图。",
+                images=[],
+                dialogue_history=dialogue_history,
+                system_prompt=system_prompt
+            )
     
     async def analyze_package_status(
         self,

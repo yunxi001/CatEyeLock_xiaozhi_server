@@ -7,6 +7,7 @@ from core.handle.textMessageHandler import TextMessageHandler
 from core.handle.textMessageType import TextMessageType
 from core.connection_manager import ConnectionManager
 from core.constants.error_codes import is_valid_error_code, get_error_message
+from core.handle.textHandler.queryHandler import _get_base_database
 
 TAG = __name__
 
@@ -83,11 +84,151 @@ class AckHandler(TextMessageHandler):
                 if callback:
                     await callback(code, msg)
             
+            # 如果是设备控制命令成功，构造 status_report 上报状态变化
+            if code == 0:
+                await self._update_device_state_from_ack(conn, seq_id)
+                # 如果是用户管理的 del/clear 命令成功，同步数据库
+                await self._handle_user_mgmt_delete(conn, seq_id)
+            
             # 转发 ACK 给关联的 App（协议 v2.2）
             await self._forward_to_apps(conn, msg_json)
                     
         except Exception as e:
             conn.logger.bind(tag=TAG).error(f"处理 ACK 失败: {e}")
+
+    async def _update_device_state_from_ack(self, conn, seq_id: str):
+        """根据 ACK 响应更新设备状态并推送给 App
+        
+        当收到设备控制命令的成功 ACK 时：
+        - 检查是否有缓存的控制命令（如灯控制）
+        - 构造 status_report 消息
+        - 发送给所有关联的 App
+        
+        Args:
+            conn: ESP32 连接对象
+            seq_id: 消息序列 ID
+        """
+        try:
+            import time
+            
+            # 检查是否是灯控制命令
+            if hasattr(conn, "last_light_control") and conn.last_light_control:
+                last_control = conn.last_light_control
+                
+                # 检查 seq_id 是否匹配
+                if last_control.get("seq_id") == seq_id:
+                    action = last_control.get("action")
+                    
+                    # 从缓存中获取其他状态数据
+                    old_state = {}
+                    if hasattr(conn, "iot_descriptors") and "smart_doorlock" in conn.iot_descriptors:
+                        old_state = conn.iot_descriptors["smart_doorlock"]
+                    
+                    # 确定新的灯状态
+                    new_light_state = 1 if action == "on" else 0
+                    
+                    # 构造 status_report 消息（使用默认值避免 null）
+                    status_report = {
+                        "type": "status_report",
+                        "ts": int(time.time() * 1000),
+                        "data": {
+                            "bat": old_state.get("battery") if old_state.get("battery") is not None else 0,
+                            "lux": old_state.get("lux") if old_state.get("lux") is not None else 0,
+                            "lock": old_state.get("lock_state") if old_state.get("lock_state") is not None else 0,
+                            "light": new_light_state
+                        }
+                    }
+                    
+                    # 更新内存缓存
+                    if not hasattr(conn, "iot_descriptors"):
+                        conn.iot_descriptors = {}
+                    
+                    conn.iot_descriptors["smart_doorlock"] = {
+                        "battery": status_report["data"]["bat"],
+                        "lux": status_report["data"]["lux"],
+                        "lock_state": status_report["data"]["lock"],
+                        "light_state": new_light_state,
+                        "last_update": status_report["ts"]
+                    }
+                    
+                    conn.logger.bind(tag=TAG).info(
+                        f"根据灯控制 ACK 构造 status_report: light={new_light_state} ({action}), "
+                        f"bat={status_report['data']['bat']}, lux={status_report['data']['lux']}, lock={status_report['data']['lock']}"
+                    )
+                    
+                    # 发送给所有关联的 App
+                    manager = ConnectionManager.get_instance()
+                    app_conns = manager.get_app_conns(conn.device_id)
+                    
+                    if app_conns:
+                        msg = json.dumps(status_report)
+                        for app_conn in app_conns:
+                            if app_conn.websocket:
+                                await app_conn.websocket.send(msg)
+                        
+                        conn.logger.bind(tag=TAG).info(
+                            f"已发送 status_report 到 {len(app_conns)} 个 App"
+                        )
+                    
+                    # 清除缓存
+                    conn.last_light_control = None
+            
+        except Exception as e:
+            conn.logger.bind(tag=TAG).warning(f"根据 ACK 更新设备状态失败: {e}")
+
+    async def _handle_user_mgmt_delete(self, conn, seq_id: str):
+        """处理用户管理删除/清空命令的数据库同步
+        
+        ESP32 对 del/clear 命令返回 ack（而非 user_mgmt_result），
+        因此需要在 ack 处理中执行数据库软删除。
+        """
+        try:
+            if not hasattr(conn, "last_user_mgmt_cmd") or not conn.last_user_mgmt_cmd:
+                return
+            
+            last_cmd = conn.last_user_mgmt_cmd
+            # 检查 seq_id 是否匹配
+            if last_cmd.get("seq_id") != seq_id:
+                return
+            
+            command = last_cmd.get("command")
+            category = last_cmd.get("category")
+            
+            # 只处理 del 和 clear 命令
+            if command not in ("del", "clear"):
+                return
+            
+            db = _get_base_database(conn)
+            if not db:
+                conn.logger.bind(tag=TAG).warning("无法获取数据库实例，跳过删除同步")
+                return
+            
+            if command == "del":
+                user_id = last_cmd.get("user_id")
+                if user_id is not None:
+                    db.delete_doorlock_user(
+                        device_id=conn.device_id,
+                        user_type=category,
+                        user_id=user_id
+                    )
+                    conn.logger.bind(tag=TAG).info(
+                        f"已从数据库软删除{category}用户: device_id={conn.device_id}, user_id={user_id}"
+                    )
+            
+            elif command == "clear":
+                count = db.clear_doorlock_users(
+                    device_id=conn.device_id,
+                    user_type=category
+                )
+                conn.logger.bind(tag=TAG).info(
+                    f"已清空数据库中{category}用户: device_id={conn.device_id}, 共 {count} 条"
+                )
+            
+            # 清除缓存，避免重复处理
+            conn.last_user_mgmt_cmd = None
+            
+        except Exception as e:
+            conn.logger.bind(tag=TAG).error(f"处理用户管理删除同步失败: {e}")
 
     async def _forward_to_apps(self, conn, msg_json: Dict[str, Any]):
         """转发 ACK 到所有关联的 App"""

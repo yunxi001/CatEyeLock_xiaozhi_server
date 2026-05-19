@@ -80,7 +80,7 @@ class Database:
                 CREATE TABLE IF NOT EXISTS persons (
                     id INT AUTO_INCREMENT PRIMARY KEY,
                     name VARCHAR(50) NOT NULL,
-                    relation_type ENUM('family', 'friend', 'colleague', 'property', 'courier', 'delivery', 'tutor', 'classmate', 'other') NOT NULL DEFAULT 'other',
+                    relation_type ENUM('owner', 'family', 'friend', 'colleague', 'property', 'courier', 'delivery', 'tutor', 'classmate', 'other') NOT NULL DEFAULT 'other',
                     face_encoding BLOB,
                     photo_path VARCHAR(255),
                     custom_greeting VARCHAR(255),
@@ -195,17 +195,20 @@ class Database:
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS doorlock_users (
                     id BIGINT AUTO_INCREMENT PRIMARY KEY,
-                    device_id VARCHAR(64) NOT NULL,
-                    user_id INT NOT NULL,
-                    name VARCHAR(64),
-                    role VARCHAR(16) DEFAULT 'member',
-                    finger_ids JSON,
-                    nfc_ids JSON,
-                    face_registered TINYINT DEFAULT 0,
-                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-                    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-                    UNIQUE KEY uk_device_user (device_id, user_id)
-                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+                    device_id VARCHAR(64) NOT NULL COMMENT '设备 ID',
+                    user_type VARCHAR(16) NOT NULL COMMENT '用户类型：finger/nfc/password',
+                    user_id INT NOT NULL COMMENT 'ESP32 分配的用户 ID（指纹/NFC 的槽位 ID）',
+                    user_name VARCHAR(64) DEFAULT NULL COMMENT '用户备注名称',
+                    user_data VARCHAR(255) DEFAULT NULL COMMENT '额外数据（如 NFC 卡号、密码哈希）',
+                    status TINYINT DEFAULT 1 COMMENT '状态：0=已删除，1=正常',
+                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+                    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+                    created_by VARCHAR(64) DEFAULT NULL COMMENT '创建者 app_id',
+                    UNIQUE KEY uk_device_type_userid (device_id, user_type, user_id),
+                    INDEX idx_device_id (device_id),
+                    INDEX idx_user_type (user_type),
+                    INDEX idx_status (status)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='门锁用户表'
             """)
             
             # 创建 media_files 表（媒体文件元数据）
@@ -221,6 +224,19 @@ class Database:
                     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
                     INDEX idx_device_type_time (device_id, file_type, created_at)
                 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+            """)
+            
+            # 创建 app_disconnect_log 表（App 断开时间记录，用于增量推送）
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS app_disconnect_log (
+                    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+                    device_id VARCHAR(64) NOT NULL COMMENT '设备 ID',
+                    app_id VARCHAR(64) NOT NULL COMMENT 'App 用户标识',
+                    disconnect_time DATETIME NOT NULL COMMENT 'App 断开连接的时间',
+                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE KEY uk_device_app (device_id, app_id),
+                    INDEX idx_device_id (device_id)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='App 断开时间记录表（用于增量推送）'
             """)
             
             conn.commit()
@@ -1014,65 +1030,85 @@ class Database:
 
     # ==================== 门锁用户 CRUD ====================
     
-    def save_doorlock_user(self, device_id: str, user_id: int, name: str = None,
-                           role: str = 'member') -> int:
-        """保存门锁用户"""
+    def save_doorlock_user(self, device_id: str, user_id: int, 
+                           user_type: str = 'finger', user_name: str = None,
+                           user_data: str = None, created_by: str = None) -> int:
+        """保存门锁用户
+        
+        适配实际数据库表结构：
+        doorlock_users(device_id, user_type, user_id, user_name, user_data, status, created_by)
+        唯一键：uk_device_type_userid(device_id, user_type, user_id)
+        """
         conn = self.get_connection()
         cursor = conn.cursor()
         try:
             cursor.execute("""
-                INSERT INTO doorlock_users (device_id, user_id, name, role)
-                VALUES (%s, %s, %s, %s)
-                ON DUPLICATE KEY UPDATE name = VALUES(name), role = VALUES(role)
-            """, (device_id, user_id, name, role))
+                INSERT INTO doorlock_users (device_id, user_type, user_id, user_name, user_data, status, created_by)
+                VALUES (%s, %s, %s, %s, %s, 1, %s)
+                ON DUPLICATE KEY UPDATE 
+                    user_name = VALUES(user_name), 
+                    user_data = VALUES(user_data),
+                    status = 1,
+                    created_by = COALESCE(VALUES(created_by), created_by)
+            """, (device_id, user_type, user_id, user_name, user_data, created_by))
             conn.commit()
             return cursor.lastrowid
         finally:
             cursor.close()
             conn.close()
-    
-    def update_doorlock_user_finger(self, device_id: str, user_id: int, 
-                                     finger_ids: list) -> bool:
-        """更新用户指纹 ID 列表"""
+
+    def delete_doorlock_user(self, device_id: str, user_type: str, user_id: int) -> bool:
+        """软删除门锁用户（将 status 设为 0）"""
         conn = self.get_connection()
         cursor = conn.cursor()
         try:
-            import json
             cursor.execute("""
-                UPDATE doorlock_users SET finger_ids = %s
-                WHERE device_id = %s AND user_id = %s
-            """, (json.dumps(finger_ids), device_id, user_id))
+                UPDATE doorlock_users SET status = 0
+                WHERE device_id = %s AND user_type = %s AND user_id = %s
+            """, (device_id, user_type, user_id))
             conn.commit()
             return cursor.rowcount > 0
         finally:
             cursor.close()
             conn.close()
-    
-    def update_doorlock_user_nfc(self, device_id: str, user_id: int, 
-                                  nfc_ids: list) -> bool:
-        """更新用户 NFC ID 列表"""
+
+    def clear_doorlock_users(self, device_id: str, user_type: str) -> int:
+        """清空指定类型的所有门锁用户（软删除）"""
         conn = self.get_connection()
         cursor = conn.cursor()
         try:
-            import json
             cursor.execute("""
-                UPDATE doorlock_users SET nfc_ids = %s
-                WHERE device_id = %s AND user_id = %s
-            """, (json.dumps(nfc_ids), device_id, user_id))
+                UPDATE doorlock_users SET status = 0
+                WHERE device_id = %s AND user_type = %s AND status = 1
+            """, (device_id, user_type))
             conn.commit()
-            return cursor.rowcount > 0
+            return cursor.rowcount
         finally:
             cursor.close()
             conn.close()
-    
-    def get_doorlock_users(self, device_id: str) -> List[dict]:
-        """获取设备的所有用户"""
+
+    def get_doorlock_users(self, device_id: str, user_type: str = None) -> List[dict]:
+        """获取设备的门锁用户列表
+        
+        Args:
+            device_id: 设备 ID
+            user_type: 用户类型过滤（可选）：finger/nfc/password
+        """
         conn = self.get_connection()
         cursor = conn.cursor(dictionary=True)
         try:
-            cursor.execute("""
-                SELECT * FROM doorlock_users WHERE device_id = %s
-            """, (device_id,))
+            if user_type:
+                cursor.execute("""
+                    SELECT * FROM doorlock_users 
+                    WHERE device_id = %s AND user_type = %s AND status = 1
+                    ORDER BY created_at DESC
+                """, (device_id, user_type))
+            else:
+                cursor.execute("""
+                    SELECT * FROM doorlock_users 
+                    WHERE device_id = %s AND status = 1
+                    ORDER BY created_at DESC
+                """, (device_id,))
             return cursor.fetchall()
         finally:
             cursor.close()

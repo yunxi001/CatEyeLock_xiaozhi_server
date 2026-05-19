@@ -601,3 +601,133 @@ class DoorlockDatabase:
                 cursor.close()
             if conn:
                 conn.close()
+
+    # ==================== 设备事件和日志查询 ====================
+    
+    def get_events(self, device_id: str, event_type: str = None, 
+                   limit: int = 100, offset: int = 0) -> Tuple[List[dict], int]:
+        """查询设备事件历史（带分页）
+        
+        Args:
+            device_id: 设备 ID
+            event_type: 事件类型过滤（可选）
+            limit: 每页数量
+            offset: 偏移量
+            
+        Returns:
+            (记录列表, 总数)
+        """
+        conn = None
+        cursor = None
+        try:
+            conn = self.get_connection()
+            cursor = conn.cursor(dictionary=True)
+            
+            # 构建查询条件
+            where_sql = "device_id = %s"
+            params = [device_id]
+            if event_type:
+                where_sql += " AND event_type = %s"
+                params.append(event_type)
+            
+            # 查询总数
+            cursor.execute(f"SELECT COUNT(*) as total FROM device_events WHERE {where_sql}", params)
+            total = cursor.fetchone()['total']
+            
+            # 查询记录
+            cursor.execute(f"""
+                SELECT id, event_type, param, created_at
+                FROM device_events 
+                WHERE {where_sql}
+                ORDER BY created_at DESC LIMIT %s OFFSET %s
+            """, params + [limit, offset])
+            records = cursor.fetchall()
+            
+            # 转换 datetime 为字符串
+            for r in records:
+                if r.get('created_at'):
+                    try:
+                        r['created_at'] = r['created_at'].isoformat()
+                    except (AttributeError, ValueError) as e:
+                        logger.bind(tag=TAG).warning(f"转换 created_at 失败: {e}")
+                        r['created_at'] = str(r['created_at'])
+            
+            return records, total
+        except Exception as e:
+            logger.bind(tag=TAG).error(f"查询事件历史失败: {e}")
+            raise
+        finally:
+            if cursor:
+                cursor.close()
+            if conn:
+                conn.close()
+    
+    def get_unlock_logs(self, device_id: str, method: str = None, 
+                        result: int = None, limit: int = 100, 
+                        offset: int = 0) -> Tuple[List[dict], int]:
+        """查询开锁日志（带分页）
+        
+        Args:
+            device_id: 设备 ID
+            method: 开锁方式过滤（可选）
+            result: 结果过滤（可选，1=成功，0=失败）
+            limit: 每页数量
+            offset: 偏移量
+            
+        Returns:
+            (记录列表, 总数)
+        """
+        conn = None
+        cursor = None
+        try:
+            conn = self.get_connection()
+            cursor = conn.cursor(dictionary=True)
+            
+            # 构建查询条件
+            where_clauses = ["device_id = %s"]
+            params = [device_id]
+            
+            if method:
+                where_clauses.append("method = %s")
+                params.append(method)
+            
+            if result is not None:
+                # result 字段在数据库中可能是 TINYINT 类型
+                # status 字段是 VARCHAR，需要根据实际表结构调整
+                where_clauses.append("(result = %s OR status = %s)")
+                status_str = "success" if result == 1 else "fail"
+                params.extend([result, status_str])
+            
+            where_sql = " AND ".join(where_clauses)
+            
+            # 查询总数
+            cursor.execute(f"SELECT COUNT(*) as total FROM unlock_logs WHERE {where_sql}", params)
+            total = cursor.fetchone()['total']
+            
+            # 查询记录
+            cursor.execute(f"""
+                SELECT id, method, user_id, result, status, fail_count, lock_time, created_at
+                FROM unlock_logs 
+                WHERE {where_sql}
+                ORDER BY created_at DESC LIMIT %s OFFSET %s
+            """, params + [limit, offset])
+            records = cursor.fetchall()
+            
+            # 转换 datetime 为字符串
+            for r in records:
+                if r.get('created_at'):
+                    try:
+                        r['created_at'] = r['created_at'].isoformat()
+                    except (AttributeError, ValueError) as e:
+                        logger.bind(tag=TAG).warning(f"转换 created_at 失败: {e}")
+                        r['created_at'] = str(r['created_at'])
+            
+            return records, total
+        except Exception as e:
+            logger.bind(tag=TAG).error(f"查询开锁日志失败: {e}")
+            raise
+        finally:
+            if cursor:
+                cursor.close()
+            if conn:
+                conn.close()

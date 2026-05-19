@@ -1,0 +1,498 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>App 上线推送功能测试</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+        
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 12px;
+            box-shadow: 0 10px 40px rgba(0,0,0,0.2);
+            overflow: hidden;
+        }
+        
+        .header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 30px;
+            text-align: center;
+        }
+        
+        .header h1 {
+            font-size: 28px;
+            margin-bottom: 10px;
+        }
+        
+        .header p {
+            opacity: 0.9;
+            font-size: 14px;
+        }
+        
+        .content {
+            display: grid;
+            grid-template-columns: 1fr 2fr;
+            gap: 20px;
+            padding: 30px;
+        }
+        
+        .config-panel {
+            background: #f8f9fa;
+            padding: 20px;
+            border-radius: 8px;
+        }
+        
+        .config-panel h2 {
+            font-size: 18px;
+            margin-bottom: 20px;
+            color: #333;
+        }
+        
+        .form-group {
+            margin-bottom: 15px;
+        }
+        
+        .form-group label {
+            display: block;
+            margin-bottom: 5px;
+            color: #555;
+            font-size: 14px;
+            font-weight: 500;
+        }
+        
+        .form-group input {
+            width: 100%;
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 6px;
+            font-size: 14px;
+            transition: border-color 0.3s;
+        }
+        
+        .form-group input:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+        
+        .btn {
+            width: 100%;
+            padding: 12px;
+            border: none;
+            border-radius: 6px;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s;
+            margin-top: 10px;
+        }
+        
+        .btn-primary {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+        }
+        
+        .btn-primary:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(102, 126, 234, 0.4);
+        }
+        
+        .btn-danger {
+            background: #dc3545;
+            color: white;
+        }
+        
+        .btn-danger:hover {
+            background: #c82333;
+        }
+        
+        .btn:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+            transform: none !important;
+        }
+        
+        .status {
+            padding: 10px;
+            border-radius: 6px;
+            margin-top: 15px;
+            font-size: 14px;
+        }
+        
+        .status.connected {
+            background: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
+        }
+        
+        .status.disconnected {
+            background: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+        }
+        
+        .messages-panel {
+            background: #f8f9fa;
+            padding: 20px;
+            border-radius: 8px;
+            height: 600px;
+            display: flex;
+            flex-direction: column;
+        }
+        
+        .messages-panel h2 {
+            font-size: 18px;
+            margin-bottom: 15px;
+            color: #333;
+        }
+        
+        .messages-container {
+            flex: 1;
+            overflow-y: auto;
+            background: white;
+            border: 1px solid #ddd;
+            border-radius: 6px;
+            padding: 15px;
+        }
+        
+        .message {
+            margin-bottom: 15px;
+            padding: 12px;
+            border-radius: 6px;
+            border-left: 4px solid #667eea;
+            background: #f8f9fa;
+        }
+        
+        .message-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 8px;
+        }
+        
+        .message-type {
+            font-weight: 600;
+            color: #667eea;
+            font-size: 14px;
+        }
+        
+        .message-time {
+            font-size: 12px;
+            color: #999;
+        }
+        
+        .message-content {
+            font-size: 13px;
+            color: #555;
+            line-height: 1.6;
+        }
+        
+        .message-content pre {
+            background: white;
+            padding: 10px;
+            border-radius: 4px;
+            overflow-x: auto;
+            margin-top: 8px;
+            font-size: 12px;
+        }
+        
+        .stats {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 10px;
+            margin-top: 15px;
+        }
+        
+        .stat-card {
+            background: white;
+            padding: 15px;
+            border-radius: 6px;
+            text-align: center;
+            border: 1px solid #ddd;
+        }
+        
+        .stat-value {
+            font-size: 24px;
+            font-weight: 700;
+            color: #667eea;
+            margin-bottom: 5px;
+        }
+        
+        .stat-label {
+            font-size: 12px;
+            color: #999;
+            text-transform: uppercase;
+        }
+        
+        .clear-btn {
+            margin-top: 10px;
+            padding: 8px 16px;
+            background: #6c757d;
+            color: white;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 14px;
+        }
+        
+        .clear-btn:hover {
+            background: #5a6268;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🚀 App 上线推送功能测试</h1>
+            <p>测试服务器在 App 连接时主动推送设备状态信息</p>
+        </div>
+        
+        <div class="content">
+            <!-- 配置面板 -->
+            <div class="config-panel">
+                <h2>⚙️ 连接配置</h2>
+                
+                <div class="form-group">
+                    <label>服务器地址</label>
+                    <input type="text" id="serverUrl" value="ws://localhost:8000/ws/app">
+                </div>
+                
+                <div class="form-group">
+                    <label>设备 ID</label>
+                    <input type="text" id="deviceId" value="AA:BB:CC:DD:EE:FF">
+                </div>
+                
+                <div class="form-group">
+                    <label>App ID</label>
+                    <input type="text" id="appId" value="test_user_001">
+                </div>
+                
+                <button class="btn btn-primary" id="connectBtn" onclick="connect()">
+                    连接服务器
+                </button>
+                
+                <button class="btn btn-danger" id="disconnectBtn" onclick="disconnect()" disabled>
+                    断开连接
+                </button>
+                
+                <div id="status" class="status disconnected">
+                    ⚫ 未连接
+                </div>
+                
+                <div class="stats">
+                    <div class="stat-card">
+                        <div class="stat-value" id="totalMessages">0</div>
+                        <div class="stat-label">总消息数</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-value" id="p0Messages">0</div>
+                        <div class="stat-label">P0 消息</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-value" id="p1Messages">0</div>
+                        <div class="stat-label">P1 消息</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-value" id="elapsedTime">0s</div>
+                        <div class="stat-label">耗时</div>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- 消息面板 -->
+            <div class="messages-panel">
+                <div style="display: flex; justify-content: space-between; align-items: center;">
+                    <h2>📨 接收消息</h2>
+                    <button class="clear-btn" onclick="clearMessages()">清空消息</button>
+                </div>
+                <div class="messages-container" id="messagesContainer">
+                    <p style="color: #999; text-align: center; margin-top: 50px;">
+                        等待连接...
+                    </p>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <script>
+        let ws = null;
+        let startTime = null;
+        let messageCount = 0;
+        let p0Count = 0;
+        let p1Count = 0;
+        
+        // P0 消息类型（立即推送）
+        const P0_TYPES = ['hello', 'device_status', 'status_report'];
+        
+        // P1 消息类型（延迟推送）
+        const P1_TYPES = ['log_report', 'visit_notification'];
+        
+        function connect() {
+            const serverUrl = document.getElementById('serverUrl').value;
+            const deviceId = document.getElementById('deviceId').value;
+            const appId = document.getElementById('appId').value;
+            
+            if (!serverUrl || !deviceId || !appId) {
+                alert('请填写完整的连接配置');
+                return;
+            }
+            
+            // 清空消息
+            clearMessages();
+            startTime = Date.now();
+            
+            // 创建 WebSocket 连接
+            ws = new WebSocket(serverUrl);
+            
+            ws.onopen = () => {
+                updateStatus('connected', '🟢 已连接');
+                document.getElementById('connectBtn').disabled = true;
+                document.getElementById('disconnectBtn').disabled = false;
+                
+                // 发送 hello 消息
+                const helloMsg = {
+                    type: 'hello',
+                    device_id: deviceId,
+                    app_id: appId,
+                    client_type: 'app'
+                };
+                
+                ws.send(JSON.stringify(helloMsg));
+                addMessage('发送', 'hello', helloMsg);
+            };
+            
+            ws.onmessage = (event) => {
+                const msg = JSON.parse(event.data);
+                addMessage('接收', msg.type, msg);
+                updateStats(msg.type);
+            };
+            
+            ws.onerror = (error) => {
+                console.error('WebSocket 错误:', error);
+                updateStatus('disconnected', '🔴 连接错误');
+            };
+            
+            ws.onclose = () => {
+                updateStatus('disconnected', '⚫ 已断开');
+                document.getElementById('connectBtn').disabled = false;
+                document.getElementById('disconnectBtn').disabled = true;
+            };
+        }
+        
+        function disconnect() {
+            if (ws) {
+                ws.close();
+                ws = null;
+            }
+        }
+        
+        function updateStatus(status, text) {
+            const statusEl = document.getElementById('status');
+            statusEl.className = `status ${status}`;
+            statusEl.textContent = text;
+        }
+        
+        function addMessage(direction, type, data) {
+            const container = document.getElementById('messagesContainer');
+            
+            // 如果是第一条消息，清空提示文本
+            if (messageCount === 0) {
+                container.innerHTML = '';
+            }
+            
+            const messageEl = document.createElement('div');
+            messageEl.className = 'message';
+            
+            const now = new Date();
+            const timeStr = now.toLocaleTimeString('zh-CN', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' }) + '.' + now.getMilliseconds().toString().padStart(3, '0');
+            
+            let content = '';
+            
+            // 根据消息类型显示不同的内容
+            if (type === 'hello') {
+                if (direction === '发送') {
+                    content = `发送认证请求: device_id=${data.device_id}, app_id=${data.app_id}`;
+                } else {
+                    const deviceInfo = data.device_info || {};
+                    content = `认证${data.status === 'ok' ? '成功' : '失败'}<br>`;
+                    content += `设备在线: ${deviceInfo.online ? '是' : '否'}<br>`;
+                    content += `工作模式: ${deviceInfo.mode || 'unknown'}`;
+                }
+            } else if (type === 'device_status') {
+                content = `设备状态: ${data.status}<br>`;
+                if (data.reason) {
+                    content += `原因: ${data.reason}`;
+                }
+            } else if (type === 'status_report') {
+                const d = data.data || {};
+                content = `电量: ${d.bat}% | 光照: ${d.lux} Lux<br>`;
+                content += `锁状态: ${d.lock} | 补光灯: ${d.light}`;
+            } else if (type === 'log_report') {
+                const d = data.data || {};
+                content = `开锁方式: ${d.method} | 用户: ${d.uid}<br>`;
+                content += `状态: ${d.status} | 失败次数: ${d.fail_count}`;
+            } else if (type === 'visit_notification') {
+                const d = data.data || {};
+                content = `访客: ${d.person_name} (${d.relation})<br>`;
+                content += `识别结果: ${d.result} | 授权: ${d.access_granted ? '是' : '否'}`;
+            } else {
+                content = '<pre>' + JSON.stringify(data, null, 2) + '</pre>';
+            }
+            
+            messageEl.innerHTML = `
+                <div class="message-header">
+                    <span class="message-type">${direction === '发送' ? '📤' : '📥'} ${type}</span>
+                    <span class="message-time">${timeStr}</span>
+                </div>
+                <div class="message-content">${content}</div>
+            `;
+            
+            container.appendChild(messageEl);
+            container.scrollTop = container.scrollHeight;
+        }
+        
+        function updateStats(type) {
+            messageCount++;
+            document.getElementById('totalMessages').textContent = messageCount;
+            
+            if (P0_TYPES.includes(type)) {
+                p0Count++;
+                document.getElementById('p0Messages').textContent = p0Count;
+            } else if (P1_TYPES.includes(type)) {
+                p1Count++;
+                document.getElementById('p1Messages').textContent = p1Count;
+            }
+            
+            if (startTime) {
+                const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
+                document.getElementById('elapsedTime').textContent = elapsed + 's';
+            }
+        }
+        
+        function clearMessages() {
+            document.getElementById('messagesContainer').innerHTML = '<p style="color: #999; text-align: center; margin-top: 50px;">等待连接...</p>';
+            messageCount = 0;
+            p0Count = 0;
+            p1Count = 0;
+            document.getElementById('totalMessages').textContent = '0';
+            document.getElementById('p0Messages').textContent = '0';
+            document.getElementById('p1Messages').textContent = '0';
+            document.getElementById('elapsedTime').textContent = '0s';
+        }
+    </script>
+</body>
+</html>

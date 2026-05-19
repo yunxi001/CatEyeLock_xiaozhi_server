@@ -44,12 +44,23 @@ unified_mode:
 
 # 快递看护模式配置（兼容旧配置）
 package_guard:
-  # 拍照间隔（秒）
+  # 拍照间隔（秒）- 已废弃，使用 monitoring_interval
   photo_interval: 5
+  # 监控间隔（秒）- 高频监控模式下的拍照间隔
+  monitoring_interval: 3
+  # PIR超时阈值（秒）- 超过此时间无PIR上报则认为人体已离开
+  pir_timeout: 2
   # 基准图片存储目录
   baseline_dir: "data/face_recognition/package_baseline/"
   # 警报照片存储目录
   alert_photo_dir: "data/face_recognition/doorlock_photos/"
+
+# 访客管理配置（新增）
+visitor_management:
+  # PIR停留阈值（秒）- 只有停留时间>=此值才触发访客处理
+  pir_stay_threshold: 3
+  # PIR超时阈值（秒）- 超过此时间无PIR上报则认为人体已离开
+  pir_timeout: 2
 
 # 照片缓存配置
 photo_cache:

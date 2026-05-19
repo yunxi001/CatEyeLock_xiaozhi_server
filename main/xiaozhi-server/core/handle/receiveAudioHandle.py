@@ -38,6 +38,13 @@ async def resume_vad_detection(conn):
 
 
 async def startToChat(conn, text):
+    # 如果门锁对话模式激活，重定向 ASR 结果到门锁队列
+    if hasattr(conn, '_doorlock_dialogue_active') and conn._doorlock_dialogue_active:
+        if hasattr(conn, '_doorlock_asr_queue'):
+            await conn._doorlock_asr_queue.put(text)
+            conn.logger.bind(tag=TAG).info(f"ASR结果重定向到门锁对话: {text}")
+            return
+
     # 检查输入是否是JSON格式（包含说话人信息）
     speaker_name = None
     actual_text = text
@@ -97,9 +104,8 @@ async def no_voice_close_connect(conn, have_voice):
     # 只有在已经初始化过时间戳的情况下才进行超时检查
     if conn.last_activity_time > 0.0:
         no_voice_time = time.time() * 1000 - conn.last_activity_time
-        close_connection_no_voice_time = int(
-            conn.config.get("close_connection_no_voice_time", 120)
-        )
+        # 固定设置为999999秒（约11.5天），禁用无语音超时断开
+        close_connection_no_voice_time = 999999
         if (
             not conn.close_after_chat
             and no_voice_time > 1000 * close_connection_no_voice_time

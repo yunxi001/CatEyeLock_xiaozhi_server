@@ -452,3 +452,34 @@ class TTSProviderBase(ABC):
                 self.processed_chars += len(full_text)
                 return True
         return False
+
+
+def get_tts_provider(config, logger_instance=None):
+    """获取 TTS 提供者实例（门锁模块使用）
+    
+    根据系统配置创建 TTS 实例，供门锁人脸识别、欢迎词播放等场景使用。
+    
+    Args:
+        config: 系统配置字典（包含 selected_module 和 TTS 配置）
+        logger_instance: 日志实例（可选，当前未使用）
+        
+    Returns:
+        TTS 提供者实例
+        
+    Raises:
+        ValueError: 当 TTS 类型不支持时
+        KeyError: 当配置缺少必要字段时
+    """
+    from core.utils import tts as tts_utils
+    
+    select_tts_module = config["selected_module"]["TTS"]
+    tts_type = (
+        select_tts_module
+        if "type" not in config["TTS"][select_tts_module]
+        else config["TTS"][select_tts_module]["type"]
+    )
+    return tts_utils.create_instance(
+        tts_type,
+        config["TTS"][select_tts_module],
+        str(config.get("delete_audio", True)).lower() in ("true", "1", "yes"),
+    )

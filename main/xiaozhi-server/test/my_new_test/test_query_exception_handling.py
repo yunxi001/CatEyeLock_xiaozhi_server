@@ -16,7 +16,7 @@ import os
 # 添加项目根目录到路径
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
-from core.handle.textHandler.queryHandler import QueryHandler, _get_database
+from core.handle.textHandler.queryHandler import QueryHandler, _get_base_database
 from core.handle.textMessageType import TextMessageType
 
 
@@ -41,7 +41,7 @@ async def test_database_unavailable():
     conn = MockConnection()
     
     # 模拟数据库不可用
-    with patch('core.handle.textHandler.queryHandler._get_database', return_value=None):
+    with patch('core.handle.textHandler.queryHandler._get_base_database', return_value=None):
         msg_json = {
             "type": "query",
             "target": "status_history",
@@ -69,7 +69,7 @@ async def test_empty_query_result():
     mock_db = Mock()
     mock_db.get_status_history = Mock(return_value=([], 0))
     
-    with patch('core.handle.textHandler.queryHandler._get_database', return_value=mock_db):
+    with patch('core.handle.textHandler.queryHandler._get_base_database', return_value=mock_db):
         msg_json = {
             "type": "query",
             "target": "status_history",
@@ -101,7 +101,7 @@ async def test_database_exception():
     mock_db = Mock()
     mock_db.get_unlock_logs = Mock(side_effect=Exception("连接超时"))
     
-    with patch('core.handle.textHandler.queryHandler._get_database', return_value=mock_db):
+    with patch('core.handle.textHandler.queryHandler._get_base_database', return_value=mock_db):
         msg_json = {
             "type": "query",
             "target": "unlock_logs",
@@ -122,15 +122,15 @@ async def test_database_exception():
 
 
 async def test_get_database_exception():
-    """测试 _get_database 异常处理"""
-    print("\n=== 测试 4: _get_database 异常处理 ===")
+    """测试 _get_base_database 异常处理"""
+    print("\n=== 测试 4: _get_base_database 异常处理 ===")
     
     conn = MockConnection()
     
     # 模拟 get_face_service 抛出异常
     with patch('core.handle.textHandler.queryHandler.get_face_service', 
                side_effect=Exception("FaceService 初始化失败")):
-        result = _get_database(conn)
+        result = _get_base_database(conn)
         
         # 验证返回 None
         assert result is None
@@ -138,8 +138,8 @@ async def test_get_database_exception():
         # 验证记录了错误日志
         assert conn.logger.error.called
         error_msg = conn.logger.error.call_args[0][0]
-        assert "获取数据库实例失败" in error_msg
-        print("✓ _get_database 异常时正确返回 None 并记录日志")
+        assert "获取基础数据库实例失败" in error_msg
+        print("✓ _get_base_database 异常时正确返回 None 并记录日志")
 
 
 async def test_query_with_filters():
@@ -153,7 +153,7 @@ async def test_query_with_filters():
     mock_db = Mock()
     mock_db.get_unlock_logs = Mock(return_value=([], 0))
     
-    with patch('core.handle.textHandler.queryHandler._get_database', return_value=mock_db):
+    with patch('core.handle.textHandler.queryHandler._get_base_database', return_value=mock_db):
         msg_json = {
             "type": "query",
             "target": "unlock_logs",

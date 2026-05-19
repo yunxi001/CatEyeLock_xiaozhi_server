@@ -22,6 +22,11 @@ def _get_database(conn):
 
 class EventReportHandler(TextMessageHandler):
     """处理 ESP32 关键事件上报"""
+    
+    # 类级别缓存：存储已初始化的数据库实例和意图处理器
+    _db_instances = {}  # {device_id: DoorlockDatabase}
+    _intent_handlers = {}  # {device_id: DoorlockIntentHandler}
+    _last_cleanup_time = 0  # 上次清理缓存的时间戳
 
     @property
     def message_type(self) -> TextMessageType:
@@ -124,17 +129,88 @@ class EventReportHandler(TextMessageHandler):
         """处理 PIR 人体检测事件
         
         PIR检测到人体时触发人脸识别流程
+        
+        优化说明：
+        1. 每次PIR上报都更新状态（pir_detected, last_pir_time, pir_duration）
+        2. 检查visitor_processing标志，避免重复触发
+        3. 只在停留时间>=阈值时触发（默认3秒，过滤路人）
+        4. 只在首次达到阈值时触发一次（避免重复触发）
+        5. 当PIR检测不到人体时（param=0），重置触发标志
         """
+        from core.utils.pir_utils import update_pir_state
+        
         duration = param  # 持续时间（秒）
+        
+        # 1. 更新PIR状态（每次上报都更新）
+        update_pir_state(conn, param, ts)
         conn.logger.bind(tag=TAG).info(f"PIR 检测到人体，持续 {duration} 秒")
         
-        # 触发人脸识别流程
-        await self._trigger_face_recognition(
-            conn=conn,
-            ts=ts,
-            param=param,
-            trigger_type="pir"
+        # 2. 如果PIR检测不到人体（人已离开），重置触发标志
+        if duration == 0:
+            if hasattr(conn, 'pir_triggered') and conn.pir_triggered:
+                conn.pir_triggered = False
+                conn.logger.bind(tag=TAG).debug(
+                    f"PIR检测不到人体，重置触发标志 - 设备: {conn.device_id}"
+                )
+            return
+        
+        # 2. 检查是否正在处理访客（防止重复触发）
+        if hasattr(conn, 'visitor_processing') and conn.visitor_processing:
+            conn.logger.bind(tag=TAG).debug(
+                f"访客处理中，忽略重复的PIR事件 - 设备: {conn.device_id}, "
+                f"持续时间: {duration}秒"
+            )
+            return
+        
+        # 3. 检查停留阈值（默认3秒，过滤路人路过）
+        pir_stay_threshold = conn.config.get('doorlock', {}).get(
+            'visitor_management', {}
+        ).get('pir_stay_threshold', 3)
+        
+        if duration < pir_stay_threshold:
+            conn.logger.bind(tag=TAG).debug(
+                f"PIR停留时间不足 {pir_stay_threshold} 秒，跳过触发 - "
+                f"设备: {conn.device_id}, 当前: {duration}秒"
+            )
+            return
+        
+        # 4. 检查是否已触发过（只在首次达到阈值时触发）
+        if hasattr(conn, 'pir_triggered') and conn.pir_triggered:
+            conn.logger.bind(tag=TAG).debug(
+                f"PIR已触发过访客处理，忽略后续事件 - 设备: {conn.device_id}, "
+                f"持续时间: {duration}秒"
+            )
+            return
+        
+        # 5. 设置触发标志（防止重复触发）
+        conn.pir_triggered = True
+        conn.visitor_processing = True
+        
+        conn.logger.bind(tag=TAG).info(
+            f"PIR停留时间达到阈值，触发访客处理 - "
+            f"设备: {conn.device_id}, 停留: {duration}秒"
         )
+        
+        # 6. 触发人脸识别流程（后台任务，不阻塞消息处理循环）
+        # 这样后续的 PIR 事件仍能被处理，update_pir_state 能持续更新
+        import asyncio
+        
+        async def _run_face_recognition():
+            try:
+                await self._trigger_face_recognition(
+                    conn=conn,
+                    ts=ts,
+                    param=param,
+                    trigger_type="pir"
+                )
+            finally:
+                # 清除访客处理标志
+                conn.visitor_processing = False
+                conn.logger.bind(tag=TAG).debug(
+                    f"清除访客处理标志 - 设备: {conn.device_id}"
+                )
+        
+        asyncio.create_task(_run_face_recognition())
     
     async def _trigger_face_recognition(
         self,
@@ -151,6 +227,8 @@ class EventReportHandler(TextMessageHandler):
         3. 触发意图识别处理器
         4. 如果看护模式激活，同时启动监控和对话
         
+        优化：使用类级别缓存，避免每次PIR事件都重新加载配置和创建实例
+        
         Args:
             conn: 连接对象
             ts: 时间戳
@@ -160,68 +238,91 @@ class EventReportHandler(TextMessageHandler):
         try:
             from core.providers.doorlock.doorlock_database import DoorlockDatabase
             from core.handle.doorlock_intent_handler import DoorlockIntentHandler
-            from core.providers.doorlock.package_guard_manager import PackageGuardManager
+            import time
             
-            # 获取设备配置
-            db = DoorlockDatabase(conn.logger)
-            config = await db.get_config(conn.device_id)
+            device_id = conn.device_id
+            
+            # 定期清理缓存（每小时清理一次，避免内存泄漏）
+            current_time = time.time()
+            if current_time - self._last_cleanup_time > 3600:
+                self._db_instances.clear()
+                self._intent_handlers.clear()
+                self._last_cleanup_time = current_time
+                conn.logger.bind(tag=TAG).debug("清理门锁处理器缓存")
+            
+            # 1. 获取或创建数据库实例（使用缓存）
+            if device_id not in self._db_instances:
+                conn.logger.bind(tag=TAG).debug(
+                    f"创建数据库实例 - 设备: {device_id}"
+                )
+                self._db_instances[device_id] = DoorlockDatabase(conn.logger)
+            
+            db = self._db_instances[device_id]
+            
+            # 2. 获取设备配置（数据库层面应该有缓存）
+            config = await db.get_config(device_id)
             
             if not config:
                 conn.logger.bind(tag=TAG).debug(
-                    f"设备 {conn.device_id} 未配置智能门锁AI功能"
+                    f"设备 {device_id} 未配置智能门锁AI功能"
                 )
                 return
             
-            # 检查是否启用人脸识别功能
+            # 3. 检查是否启用人脸识别功能
             if not config.face_recognition_enabled:
                 conn.logger.bind(tag=TAG).debug(
-                    f"设备 {conn.device_id} 未启用人脸识别功能"
+                    f"设备 {device_id} 未启用人脸识别功能"
                 )
                 return
             
-            # 检查是否启用意图识别
+            # 4. 检查是否启用意图识别
             if not config.intent_recognition_enabled:
                 conn.logger.bind(tag=TAG).debug(
-                    f"设备 {conn.device_id} 未启用意图识别功能"
+                    f"设备 {device_id} 未启用意图识别功能"
                 )
                 return
             
             conn.logger.bind(tag=TAG).info(
-                f"设备 {conn.device_id} 触发智能门锁AI处理流程 - "
+                f"设备 {device_id} 触发智能门锁AI处理流程 - "
                 f"触发类型: {trigger_type}"
             )
             
-            # 创建意图识别处理器（使用工厂方法）
-            intent_handler = await DoorlockIntentHandler.create_from_config(
-                config=conn.config,
-                logger_instance=conn.logger
-            )
+            # 5. 获取或创建意图识别处理器（使用缓存）
+            if device_id not in self._intent_handlers:
+                conn.logger.bind(tag=TAG).debug(
+                    f"创建意图识别处理器 - 设备: {device_id}"
+                )
+                self._intent_handlers[device_id] = await DoorlockIntentHandler.create_from_config(
+                    config=conn.config,
+                    logger_instance=conn.logger
+                )
             
-            # 检查看护模式状态
-            guard_manager = PackageGuardManager(conn.config, conn.logger)
-            is_guard_active = await guard_manager.is_active(conn.device_id)
+            intent_handler = self._intent_handlers[device_id]
             
-            # 处理访客到访（会自动处理人脸识别、意图识别对话等）
+            # 6. 检查看护模式状态（直接查询数据库配置，无需创建完整的管理器）
+            is_guard_active = config.package_guard_active
+            
+            # 7. 处理访客到访（会自动处理人脸识别、意图识别对话等）
             # 如果看护模式激活，会同时启动监控和对话
             result = await intent_handler.handle_visitor(
-                device_id=conn.device_id,
+                device_id=device_id,
                 conn=conn,
                 guard_active=is_guard_active
             )
             
             if result.get("success"):
                 conn.logger.bind(tag=TAG).info(
-                    f"设备 {conn.device_id} 智能门锁AI处理完成 - "
+                    f"设备 {device_id} 智能门锁AI处理完成 - "
                     f"触发类型: {trigger_type}, action={result.get('action')}"
                 )
             else:
                 conn.logger.bind(tag=TAG).warning(
-                    f"设备 {conn.device_id} 智能门锁AI处理失败 - "
+                    f"设备 {device_id} 智能门锁AI处理失败 - "
                     f"触发类型: {trigger_type}, error={result.get('error')}"
                 )
             
         except ImportError as e:
-            conn.logger.bind(tag=TAG).debug(f"智能门锁AI模块未安装: {e}")
+            conn.logger.bind(tag=TAG).warning(f"智能门锁AI模块导入失败: {e}")
         except Exception as e:
             conn.logger.bind(tag=TAG).error(
                 f"处理智能门锁AI功能失败 - 触发类型: {trigger_type}, 错误: {e}"

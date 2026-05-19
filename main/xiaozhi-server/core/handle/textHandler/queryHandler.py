@@ -1,13 +1,16 @@
 """
 数据查询消息处理器
 
-协议版本: v2.2
+协议版本: v2.5
 支持查询:
 - status: 当前设备状态
 - status_history: 历史状态
 - events: 事件历史
 - unlock_logs: 开锁日志
 - media_files: 媒体文件列表
+- password: 设备密码
+- visitor_intents: 访客意图历史
+- package_alerts: 快递警报历史
 """
 import json
 from typing import Dict, Any, Optional
@@ -19,16 +22,58 @@ from core.handle.textHandler.faceRecognitionHandler import get_face_service
 TAG = __name__
 
 
-def _get_database(conn):
-    """获取数据库实例
+def _get_ai_database(conn):
+    """获取 AI 功能数据库实例（DoorlockDatabase）
     
-    优先从 FaceService 获取，确保使用同一个数据库连接池
+    用于访客意图、快递警报等 AI 功能查询
     """
     try:
         face_service = get_face_service(conn.logger)
-        return face_service.db
+        # 检查 face_service 是否有 doorlock_db 属性
+        if hasattr(face_service, 'doorlock_db'):
+            return face_service.doorlock_db
+        
+        # 如果没有，尝试创建 DoorlockDatabase 实例
+        from core.providers.doorlock.doorlock_database import DoorlockDatabase
+        from config.config_loader import load_config
+        
+        config = load_config()
+        doorlock_db = DoorlockDatabase(config)
+        
+        # 缓存到 face_service 中，避免重复创建
+        face_service.doorlock_db = doorlock_db
+        
+        return doorlock_db
     except Exception as e:
-        conn.logger.bind(tag=TAG).error(f"获取数据库实例失败: {e}")
+        conn.logger.bind(tag=TAG).error(f"获取 AI 数据库实例失败: {e}")
+        return None
+
+
+def _get_base_database(conn):
+    """获取基础功能数据库实例（Database）
+    
+    用于设备状态、事件、开锁日志、密码、门锁用户等基础查询
+    """
+    try:
+        face_service = get_face_service(conn.logger)
+        # 检查 face_service 是否有 db 属性
+        if hasattr(face_service, 'db'):
+            return face_service.db
+        
+        # 如果没有，尝试创建 Database 实例
+        from core.providers.doorlock.database import Database
+        from config.config_loader import load_config
+        
+        config = load_config()
+        mysql_config = config.get('mysql', {})
+        base_db = Database(mysql_config, logger=conn.logger, auto_init=False)
+        
+        # 缓存到 face_service 中，避免重复创建
+        face_service.db = base_db
+        
+        return base_db
+    except Exception as e:
+        conn.logger.bind(tag=TAG).error(f"获取基础数据库实例失败: {e}")
         return None
 
 
@@ -55,7 +100,10 @@ class QueryHandler(TextMessageHandler):
             "events": self._query_events,
             "unlock_logs": self._query_unlock_logs,
             "media_files": self._query_media_files,
-            "password": self._query_password,  # 新增密码查询
+            "password": self._query_password,
+            "visitor_intents": self._query_visitor_intents,  # 新增访客意图查询
+            "package_alerts": self._query_package_alerts,    # 新增快递警报查询
+            "doorlock_users": self._query_doorlock_users,    # 新增门锁用户查询
         }
         
         handler = handlers.get(target)
@@ -82,7 +130,7 @@ class QueryHandler(TextMessageHandler):
                 })
             else:
                 # 尝试从数据库读取最新状态
-                db = _get_database(conn)
+                db = _get_base_database(conn)
                 if db:
                     status = db.get_latest_status(conn.device_id)
                     if status:
@@ -101,7 +149,7 @@ class QueryHandler(TextMessageHandler):
             limit = min(data.get("limit", 100), 500)
             offset = data.get("offset", 0)
             
-            db = _get_database(conn)
+            db = _get_base_database(conn)
             if not db:
                 await self._send_error(conn, "status_history", "数据库不可用")
                 return
@@ -134,7 +182,7 @@ class QueryHandler(TextMessageHandler):
             limit = min(data.get("limit", 100), 500)
             offset = data.get("offset", 0)
             
-            db = _get_database(conn)
+            db = _get_base_database(conn)
             if not db:
                 await self._send_error(conn, "events", "数据库不可用")
                 return
@@ -170,7 +218,7 @@ class QueryHandler(TextMessageHandler):
             limit = min(data.get("limit", 100), 500)
             offset = data.get("offset", 0)
             
-            db = _get_database(conn)
+            db = _get_base_database(conn)
             if not db:
                 await self._send_error(conn, "unlock_logs", "数据库不可用")
                 return
@@ -213,7 +261,7 @@ class QueryHandler(TextMessageHandler):
             limit = min(data.get("limit", 100), 500)
             offset = data.get("offset", 0)
             
-            db = _get_database(conn)
+            db = _get_base_database(conn)
             if not db:
                 await self._send_error(conn, "media_files", "数据库不可用")
                 return
@@ -253,7 +301,7 @@ class QueryHandler(TextMessageHandler):
     async def _query_password(self, conn, data: Dict):
         """查询设备密码（从服务器数据库读取）"""
         try:
-            db = _get_database(conn)
+            db = _get_base_database(conn)
             if not db:
                 await self._send_error(conn, "password", "数据库不可用")
                 return
@@ -278,6 +326,250 @@ class QueryHandler(TextMessageHandler):
             conn.logger.bind(tag=TAG).error(f"查询密码失败: {e}")
             await self._send_error(conn, "password", str(e))
 
+    async def _query_visitor_intents(self, conn, data: Dict):
+        """查询访客意图历史
+        
+        请求参数:
+        - start_date: 开始日期 (YYYY-MM-DD)，可选
+        - end_date: 结束日期 (YYYY-MM-DD)，可选
+        - limit: 返回条数，默认20，最大100
+        - offset: 偏移量，默认0
+        """
+        try:
+            from datetime import datetime
+            
+            start_date_str = data.get("start_date")
+            end_date_str = data.get("end_date")
+            limit = min(data.get("limit", 20), 100)
+            offset = data.get("offset", 0)
+            
+            # 转换日期字符串为 datetime 对象
+            start_date = None
+            end_date = None
+            
+            if start_date_str:
+                try:
+                    start_date = datetime.strptime(start_date_str, "%Y-%m-%d")
+                except ValueError:
+                    conn.logger.bind(tag=TAG).warning(f"无效的开始日期格式: {start_date_str}")
+            
+            if end_date_str:
+                try:
+                    end_date = datetime.strptime(end_date_str, "%Y-%m-%d")
+                except ValueError:
+                    conn.logger.bind(tag=TAG).warning(f"无效的结束日期格式: {end_date_str}")
+            
+            db = _get_ai_database(conn)
+            if not db:
+                await self._send_error(conn, "visitor_intents", "数据库不可用")
+                return
+            
+            # 调用数据库方法查询
+            records, total = await db.get_visitor_intents(
+                device_id=conn.device_id,
+                limit=limit,
+                offset=offset,
+                start_date=start_date,
+                end_date=end_date
+            )
+            
+            # 转换记录为字典格式
+            records_dict = []
+            for record in records:
+                # important_notes 和 ai_analysis 嵌套在 intent_summary 字典中
+                intent_summary = record.intent_summary or {}
+                record_dict = {
+                    "id": record.id,
+                    "visit_id": record.visit_id,
+                    "session_id": record.session_id,
+                    "person_id": record.person_id,
+                    "intent_type": record.intent_type,
+                    "intent_summary": intent_summary,
+                    "important_notes": intent_summary.get("important_notes", []),
+                    "ai_analysis": intent_summary.get("ai_analysis", ""),
+                    "dialogue_history": record.dialogue_history or [],
+                    "created_at": record.created_at.isoformat() if record.created_at else None
+                }
+                records_dict.append(record_dict)
+            
+            # 检查是否有数据
+            if total == 0 and offset == 0:
+                filter_parts = []
+                if start_date_str:
+                    filter_parts.append(f"起始: {start_date_str}")
+                if end_date_str:
+                    filter_parts.append(f"结束: {end_date_str}")
+                filter_msg = f"（{', '.join(filter_parts)}）" if filter_parts else ""
+                conn.logger.bind(tag=TAG).info(f"设备 {conn.device_id} 暂无访客意图历史数据{filter_msg}")
+            
+            conn.logger.bind(tag=TAG).info(
+                f"查询访客意图历史成功: device_id={conn.device_id}, count={len(records_dict)}, total={total}"
+            )
+            
+            await self._send_response(conn, "visitor_intents", {
+                "records": records_dict,
+                "total": total,
+                "limit": limit,
+                "offset": offset
+            })
+            
+        except Exception as e:
+            conn.logger.bind(tag=TAG).error(f"查询访客意图历史失败: device_id={conn.device_id}, error={e}")
+            await self._send_error(conn, "visitor_intents", str(e))
+
+    async def _query_package_alerts(self, conn, data: Dict):
+        """查询快递警报历史
+        
+        请求参数:
+        - start_date: 开始日期 (YYYY-MM-DD)，可选
+        - end_date: 结束日期 (YYYY-MM-DD)，可选
+        - limit: 返回条数，默认20，最大100
+        - offset: 偏移量，默认0
+        """
+        try:
+            from datetime import datetime
+            
+            start_date_str = data.get("start_date")
+            end_date_str = data.get("end_date")
+            limit = min(data.get("limit", 20), 100)
+            offset = data.get("offset", 0)
+            
+            # 转换日期字符串为 datetime 对象
+            start_date = None
+            end_date = None
+            
+            if start_date_str:
+                try:
+                    start_date = datetime.strptime(start_date_str, "%Y-%m-%d")
+                except ValueError:
+                    conn.logger.bind(tag=TAG).warning(f"无效的开始日期格式: {start_date_str}")
+            
+            if end_date_str:
+                try:
+                    end_date = datetime.strptime(end_date_str, "%Y-%m-%d")
+                except ValueError:
+                    conn.logger.bind(tag=TAG).warning(f"无效的结束日期格式: {end_date_str}")
+            
+            db = _get_ai_database(conn)
+            if not db:
+                await self._send_error(conn, "package_alerts", "数据库不可用")
+                return
+            
+            # 调用数据库方法查询
+            records, total = await db.get_package_alerts(
+                device_id=conn.device_id,
+                limit=limit,
+                offset=offset,
+                start_date=start_date,
+                end_date=end_date
+            )
+            
+            # 转换记录为字典格式
+            records_dict = []
+            for record in records:
+                record_dict = {
+                    "id": record.id,
+                    "device_id": record.device_id,
+                    "session_id": record.session_id,
+                    "threat_level": record.threat_level,
+                    "action": record.action,
+                    "description": record.description or "",
+                    "photo_path": record.photo_path or "",
+                    "voice_warning_sent": record.voice_warning_sent,
+                    "notified": record.notified,
+                    "created_at": record.created_at.isoformat() if record.created_at else None
+                }
+                records_dict.append(record_dict)
+            
+            # 检查是否有数据
+            if total == 0 and offset == 0:
+                filter_parts = []
+                if start_date_str:
+                    filter_parts.append(f"起始: {start_date_str}")
+                if end_date_str:
+                    filter_parts.append(f"结束: {end_date_str}")
+                filter_msg = f"（{', '.join(filter_parts)}）" if filter_parts else ""
+                conn.logger.bind(tag=TAG).info(f"设备 {conn.device_id} 暂无快递警报历史数据{filter_msg}")
+            
+            conn.logger.bind(tag=TAG).info(
+                f"查询快递警报历史成功: device_id={conn.device_id}, count={len(records_dict)}, total={total}"
+            )
+            
+            await self._send_response(conn, "package_alerts", {
+                "records": records_dict,
+                "total": total,
+                "limit": limit,
+                "offset": offset
+            })
+            
+        except Exception as e:
+            conn.logger.bind(tag=TAG).error(f"查询快递警报历史失败: device_id={conn.device_id}, error={e}")
+            await self._send_error(conn, "package_alerts", str(e))
+
+    async def _query_doorlock_users(self, conn, data: Dict):
+        """查询门锁用户列表
+        
+        适配实际表结构：doorlock_users(device_id, user_type, user_id, user_name, user_data, status)
+        
+        请求参数:
+        - user_type: 用户类型过滤（可选）：finger/nfc/password
+        - limit: 返回条数，默认100，最大500
+        - offset: 偏移量，默认0
+        """
+        try:
+            user_type = data.get("user_type")
+            limit = min(data.get("limit", 100), 500)
+            offset = data.get("offset", 0)
+            
+            db = _get_base_database(conn)
+            if not db:
+                await self._send_error(conn, "doorlock_users", "数据库不可用")
+                return
+            
+            # 直接通过 user_type 参数查询，数据库方法已支持过滤
+            all_users = db.get_doorlock_users(conn.device_id, user_type=user_type)
+            
+            # 分页
+            total = len(all_users)
+            records = all_users[offset:offset + limit]
+            
+            # 转换记录格式（适配实际表字段）
+            records_dict = []
+            for user in records:
+                record_dict = {
+                    "id": user.get('id'),
+                    "device_id": user.get('device_id'),
+                    "user_type": user.get('user_type', ''),
+                    "user_id": user.get('user_id'),
+                    "user_name": user.get('user_name', ''),
+                    "user_data": user.get('user_data', ''),
+                    "status": user.get('status', 1),
+                    "created_at": user.get('created_at').isoformat() if user.get('created_at') else None,
+                    "updated_at": user.get('updated_at').isoformat() if user.get('updated_at') else None,
+                    "created_by": user.get('created_by', '')
+                }
+                records_dict.append(record_dict)
+            
+            # 检查是否有数据
+            if total == 0 and offset == 0:
+                filter_msg = f"（类型: {user_type}）" if user_type else ""
+                conn.logger.bind(tag=TAG).info(f"设备 {conn.device_id} 暂无门锁用户数据{filter_msg}")
+            
+            conn.logger.bind(tag=TAG).info(
+                f"查询门锁用户成功: device_id={conn.device_id}, count={len(records_dict)}, total={total}"
+            )
+            
+            await self._send_response(conn, "doorlock_users", {
+                "records": records_dict,
+                "total": total,
+                "limit": limit,
+                "offset": offset
+            })
+            
+        except Exception as e:
+            conn.logger.bind(tag=TAG).error(f"查询门锁用户失败: device_id={conn.device_id}, error={e}")
+            await self._send_error(conn, "doorlock_users", str(e))
+
     async def _send_response(self, conn, target: str, data: Any):
         """发送查询响应"""
         try:
@@ -293,6 +585,7 @@ class QueryHandler(TextMessageHandler):
     async def _send_error(self, conn, target: str, error: str):
         """发送错误响应"""
         try:
+            conn.logger.bind(tag=TAG).error(f"查询失败: target={target}, error={error}")
             await conn.websocket.send(json.dumps({
                 "type": "query_result",
                 "target": target,

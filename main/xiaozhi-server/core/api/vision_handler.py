@@ -89,6 +89,38 @@ class VisionHandler:
                     "不支持的文件格式，请上传有效的图片文件（支持JPEG、PNG、GIF、BMP、TIFF、WEBP格式）"
                 )
 
+            # 通知门锁图片上传回调（如果有等待中的拍照请求）
+            # 如果有门锁拍照回调在等待，只传递图片数据，跳过 VLLM 分析
+            doorlock_capture_active = False
+            try:
+                from core.http_server import SimpleHttpServer
+                http_server = SimpleHttpServer.get_instance()
+                if http_server and hasattr(http_server, 'image_upload_handler'):
+                    handler = http_server.image_upload_handler
+                    if device_id and device_id in handler.upload_callbacks:
+                        callback = handler.upload_callbacks[device_id]
+                        import asyncio
+                        await callback(device_id, image_data, 0, 0, 0)
+                        doorlock_capture_active = True
+                        self.logger.bind(tag=TAG).info(
+                            f"门锁拍照模式：已传递图片数据，跳过VLLM分析 - 设备: {device_id}"
+                        )
+            except Exception as e:
+                self.logger.bind(tag=TAG).warning(f"通知门锁拍照回调失败: {e}")
+
+            # 如果是门锁拍照请求，直接返回成功，不调用 VLLM
+            if doorlock_capture_active:
+                return_json = {
+                    "success": True,
+                    "action": Action.RESPONSE.name,
+                    "response": "拍照完成",
+                }
+                response = web.Response(
+                    text=json.dumps(return_json, separators=(",", ":")),
+                    content_type="application/json",
+                )
+                return response
+
             # 将图片转换为base64编码
             image_base64 = base64.b64encode(image_data).decode("utf-8")
 

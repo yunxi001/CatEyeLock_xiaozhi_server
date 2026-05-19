@@ -90,11 +90,23 @@ class DoorlockIntentHandler:
         doorlock_config = config.get('doorlock', {})
         
         # 初始化各个组件
-        face_handler = FaceRecognitionHandler(config, logger_instance)
-        greeting_handler = GreetingHandler(config, logger_instance)
-        session_manager = SessionManager(logger_instance)
+        # 获取人脸识别服务和TTS提供者
+        from core.handle.textHandler.faceRecognitionHandler import get_face_service
+        from core.providers.tts.base import get_tts_provider
+        
+        face_service = get_face_service(logger_instance)
+        tts_provider = get_tts_provider(config, logger_instance)
+        
+        # 修复：FaceRecognitionHandler 需要 3 个参数
+        face_handler = FaceRecognitionHandler(
+            face_service=face_service,
+            tts_provider=tts_provider,
+            config=doorlock_config.get('face_recognition', {})
+        )
+        session_manager = SessionManager()
         notification_service = NotificationService()
         doorlock_database = DoorlockDatabase(logger_instance)
+        greeting_handler = GreetingHandler(doorlock_database, tts_provider)
         
         # 初始化VLLM提供者
         vllm_provider = None
@@ -158,12 +170,24 @@ class DoorlockIntentHandler:
                     logger.bind(tag=TAG).error(f"拍照失败 - 设备: {device_id}")
                     return {"success": False, "error": "拍照失败"}
             
-            # 步骤2: 人脸识别（支持重试）
+            # 步骤2: 人脸识别（支持重试，会检查PIR状态）
             recognition_result = await self.face_handler.recognize_with_retry(
                 device_id=device_id,
                 jpeg_data=jpeg_data,
-                conn=conn
+                conn=conn  # 传入conn参数，用于PIR状态检查
             )
+            
+            # 处理PIR中断情况（人体已离开）
+            if recognition_result.get("result") == "pir_interrupted":
+                logger.bind(tag=TAG).info(
+                    f"访客已离开，中止处理 - 设备: {device_id}, 会话: {session_id}"
+                )
+                await self.session_manager.cleanup_session(session_id)
+                return {
+                    "success": False,
+                    "action": "visitor_left",
+                    "reason": "pir_interrupted"
+                }
             
             # 步骤3: 判断是否有开门权限
             if recognition_result["success"] and recognition_result["person"]:
@@ -189,6 +213,9 @@ class DoorlockIntentHandler:
                         reason="authorized_user"
                     )
                     
+                    # 通知 ESP32 进入唤醒状态（准备播放欢迎词）
+                    await self._send_start_listening(conn)
+                    
                     # 播放欢迎词
                     await self.greeting_handler.play_welcome_greeting(
                         device_id=device_id,
@@ -196,6 +223,9 @@ class DoorlockIntentHandler:
                         person_name=person.name,
                         conn=conn
                     )
+                    
+                    # 通知 ESP32 停止麦克风录制
+                    await self._send_stop_listening(conn)
                     
                     # 清除会话
                     await self.session_manager.cleanup_session(session_id)
@@ -252,6 +282,9 @@ class DoorlockIntentHandler:
                 visitor_image=jpeg_data,
                 conn=conn
             )
+            
+            # 对话结束，通知 ESP32 停止麦克风录制
+            await self._send_stop_listening(conn)
             
             # 清除会话
             await self.session_manager.cleanup_session(session_id)
@@ -373,8 +406,11 @@ class DoorlockIntentHandler:
         )
         
         try:
+            # 步骤0: 通知 ESP32 进入唤醒状态（开始录音）
+            await self._send_start_listening(conn)
+            
             # 步骤1: 播放主动问候
-            greeting = await self._play_initial_greeting(device_id, person_info)
+            greeting = await self._play_initial_greeting(device_id, person_info, conn)
             
             # 添加问候到对话历史
             self.session_manager.add_dialogue(
@@ -391,7 +427,7 @@ class DoorlockIntentHandler:
                 # 检查对话是否应该结束
                 should_end = await self.session_manager.check_dialogue_end(
                     session_id=session_id,
-                    pir_detected=await self._check_pir_status(device_id)
+                    pir_detected=await self._check_pir_status(device_id, conn)
                 )
                 
                 if should_end:
@@ -400,14 +436,15 @@ class DoorlockIntentHandler:
                     )
                     break
                 
-                # 等待访客回复（这里需要集成ASR服务）
-                # TODO: 集成ASR服务获取访客语音
-                visitor_response = await self._wait_for_visitor_response(device_id)
+                # 等待访客回复（通过 VAD + ASR 获取语音识别结果）
+                visitor_response = await self._wait_for_visitor_response(device_id, conn)
                 
                 if not visitor_response:
-                    # 访客沉默，继续检查
-                    await asyncio.sleep(1)
-                    continue
+                    # 访客沉默超时，结束对话
+                    logger.bind(tag=TAG).info(
+                        f"访客沉默超时，结束对话 - 会话: {session_id}"
+                    )
+                    break
                 
                 # 添加访客回复到对话历史
                 self.session_manager.add_dialogue(
@@ -419,15 +456,23 @@ class DoorlockIntentHandler:
                 # 调用VLLM进行意图识别
                 dialogue_history = self.session_manager.get_dialogue_history(session_id)
                 
-                # 转换图片为Base64
-                import base64
-                visitor_image_base64 = base64.b64encode(visitor_image).decode('utf-8')
-                
-                vllm_result = await self.vllm.analyze_intent(
-                    visitor_image=visitor_image_base64,
-                    dialogue_history=dialogue_history,
-                    system_prompt=self.intent_recognition_prompt
-                )
+                # 第一轮传图片（VLLM），后续轮次纯文本
+                if dialogue_count == 0:
+                    # 第一轮：带图片分析（analyze_with_tools 内部会加 data:image/jpeg;base64, 前缀）
+                    import base64
+                    visitor_image_base64 = base64.b64encode(visitor_image).decode('utf-8')
+                    vllm_result = await self.vllm.analyze_intent(
+                        visitor_image=visitor_image_base64,
+                        dialogue_history=dialogue_history,
+                        system_prompt=self.intent_recognition_prompt
+                    )
+                else:
+                    # 后续轮次：纯文本对话（不传图片，节省 Token）
+                    vllm_result = await self.vllm.analyze_intent(
+                        visitor_image=None,
+                        dialogue_history=dialogue_history,
+                        system_prompt=self.intent_recognition_prompt
+                    )
                 
                 # 检查Token使用量
                 self._check_token_usage(vllm_result.get("token_usage", {}))
@@ -443,7 +488,7 @@ class DoorlockIntentHandler:
                     )
                     
                     # 播放AI回复
-                    await self._play_ai_response(device_id, ai_response)
+                    await self._play_ai_response(device_id, ai_response, conn)
                 
                 # 处理工具调用
                 tool_calls = vllm_result.get("tool_calls", [])
@@ -639,42 +684,158 @@ class DoorlockIntentHandler:
         
         logger.bind(tag=TAG).info(f"播放主动问候 - 设备: {device_id}, 内容: {greeting}")
         
-        # TODO: 调用TTS服务播放语音
-        # if conn and hasattr(conn, 'tts_service'):
-        #     await conn.tts_service.play(greeting)
+        # 通过设备连接播放 TTS（遵循正常对话流程：FIRST → MIDDLE → LAST）
+        if conn and hasattr(conn, 'tts') and conn.tts:
+            self._send_tts_complete(conn, greeting)
         
         return greeting
     
-    async def _check_pir_status(self, device_id: str) -> bool:
+    def _send_tts_complete(self, conn, text: str):
+        """发送 TTS 文本（遵循正常对话流程）
+        
+        正常对话中的消息序列：
+        - 第一段音频前：tts:start + sentence_start + 音频
+        - 后续段音频：sentence_start + 音频
+        - 全部播完后：tts:stop（ESP32 恢复录音）
+        
+        门锁场景中，每次 AI 回复作为一个完整会话：
+        FIRST(ACTION) → MIDDLE(TEXT) → LAST(ACTION)
+        
+        注意：连续播放多句时，需要等待上一句播放完成后再发下一句。
+        通过 tts_audio_queue 的阻塞机制自动实现排队。
+        
+        Args:
+            conn: 连接对象
+            text: 要播放的文本
+        """
+        from core.providers.tts.dto.dto import ContentType, SentenceType, TTSMessageDTO
+        import uuid
+        
+        sentence_id = str(uuid.uuid4().hex)
+        conn.sentence_id = sentence_id
+        
+        # FIRST (ACTION): 初始化 TTS 状态
+        conn.tts.tts_text_queue.put(TTSMessageDTO(
+            sentence_id=sentence_id,
+            sentence_type=SentenceType.FIRST,
+            content_type=ContentType.ACTION,
+        ))
+        
+        # MIDDLE (TEXT): 实际文本内容
+        conn.tts.tts_text_queue.put(TTSMessageDTO(
+            sentence_id=sentence_id,
+            sentence_type=SentenceType.MIDDLE,
+            content_type=ContentType.TEXT,
+            content_detail=text,
+        ))
+        
+        # LAST (ACTION): 结束当前会话，触发 tts:stop
+        conn.tts.tts_text_queue.put(TTSMessageDTO(
+            sentence_id=sentence_id,
+            sentence_type=SentenceType.LAST,
+            content_type=ContentType.ACTION,
+        ))
+
+    async def _check_pir_status(self, device_id: str, conn=None) -> bool:
         """检查PIR传感器状态
         
         Args:
             device_id: 设备ID
+            conn: 连接对象
             
         Returns:
             是否检测到人体
         """
-        # TODO: 查询设备的PIR状态
-        # 这里简化处理，假设一直有人
+        if conn:
+            from core.utils.pir_utils import check_pir_status
+            return check_pir_status(conn, timeout=5.0)
         return True
+    
+    async def _send_start_listening(self, conn):
+        """通知 ESP32 进入唤醒状态（开始麦克风录制）
+        
+        在意图识别对话开始前发送，让 ESP32 准备好接收/发送音频。
+        
+        Args:
+            conn: 连接对象
+        """
+        try:
+            if not conn or not hasattr(conn, 'websocket') or not conn.websocket:
+                logger.bind(tag=TAG).warning("无法发送 start_listening：连接不可用")
+                return
+            
+            import json
+            start_msg = {"type": "system", "command": "start_listening"}
+            await conn.websocket.send(json.dumps(start_msg))
+            logger.bind(tag=TAG).info(
+                f"已发送 start_listening - 设备: {conn.device_id}"
+            )
+            
+            # 等待 ESP32 进入唤醒状态
+            await asyncio.sleep(0.5)
+        except Exception as e:
+            logger.bind(tag=TAG).error(f"发送 start_listening 失败: {e}")
+
+    async def _send_stop_listening(self, conn):
+        """通知 ESP32 停止麦克风录制
+        
+        对话结束后发送，让 ESP32 退出唤醒状态。
+        同时清除门锁对话模式标志。
+        
+        Args:
+            conn: 连接对象
+        """
+        try:
+            # 清除门锁对话模式标志
+            if conn and hasattr(conn, '_doorlock_dialogue_active'):
+                conn._doorlock_dialogue_active = False
+            
+            if not conn or not hasattr(conn, 'websocket') or not conn.websocket:
+                logger.bind(tag=TAG).warning("无法发送 stop_listening：连接不可用")
+                return
+            
+            import json
+            stop_msg = {"type": "system", "command": "stop_listening"}
+            await conn.websocket.send(json.dumps(stop_msg))
+            logger.bind(tag=TAG).info(
+                f"已发送 stop_listening - 设备: {conn.device_id}"
+            )
+        except Exception as e:
+            logger.bind(tag=TAG).error(f"发送 stop_listening 失败: {e}")
     
     async def _wait_for_visitor_response(self, device_id: str, conn=None) -> Optional[str]:
         """等待访客回复
+        
+        通过拦截 conn 的正常对话流程，获取 ASR 识别结果。
+        ESP32 持续发送音频 → 服务器 VAD 检测 → ASR 转文字 → 返回文本。
         
         Args:
             device_id: 设备ID
             conn: 连接对象（用于ASR服务）
             
         Returns:
-            访客回复文本，如果没有回复返回None
+            访客回复文本，如果超时返回None
         """
-        # TODO: 集成ASR服务，等待语音识别结果
-        # if conn and hasattr(conn, 'asr_service'):
-        #     return await conn.asr_service.recognize()
+        if not conn:
+            await asyncio.sleep(1)
+            return None
         
-        # 这里简化处理，返回None表示没有回复
-        await asyncio.sleep(1)
-        return None
+        # 使用 asyncio.Queue 接收 ASR 结果
+        if not hasattr(conn, '_doorlock_asr_queue'):
+            conn._doorlock_asr_queue = asyncio.Queue()
+        
+        # 设置门锁对话模式标志（让 startToChat 重定向到此队列）
+        conn._doorlock_dialogue_active = True
+        
+        try:
+            # 等待 ASR 结果，超时时间为对话超时
+            text = await asyncio.wait_for(
+                conn._doorlock_asr_queue.get(),
+                timeout=self.dialogue_timeout
+            )
+            return text
+        except asyncio.TimeoutError:
+            return None
     
     async def _play_ai_response(self, device_id: str, response: str, conn=None):
         """播放AI回复
@@ -684,11 +845,12 @@ class DoorlockIntentHandler:
             response: 回复文本
             conn: 连接对象（用于TTS服务）
         """
-        logger.bind(tag=TAG).debug(f"播放AI回复 - 设备: {device_id}, 内容: {response}")
+        logger.bind(tag=TAG).info(f"播放AI回复 - 设备: {device_id}, 内容: {response}")
         
-        # TODO: 调用TTS服务播放语音
-        # if conn and hasattr(conn, 'tts_service'):
-        #     await conn.tts_service.play(response)
+        if conn and hasattr(conn, 'tts') and conn.tts:
+            self._send_tts_complete(conn, response)
+        else:
+            logger.bind(tag=TAG).warning(f"无法播放AI回复：连接对象无 TTS 实例")
     
     def _check_token_usage(self, token_usage: Dict[str, int]):
         """检查Token使用量
@@ -801,7 +963,7 @@ class DoorlockIntentHandler:
             }
             
             # 发送消息
-            await conn.send_json(face_result_msg)
+            await conn.websocket.send(json.dumps(face_result_msg))
             
             logger.bind(tag=TAG).info(
                 f"已发送face_result - 设备: {conn.device_id}, "

@@ -9,9 +9,10 @@
 """
 
 from dataclasses import dataclass, field, asdict
-from datetime import datetime
+from datetime import datetime, time
 from typing import Optional, List, Dict, Any
 import json
+import base64
 
 
 @dataclass
@@ -327,10 +328,11 @@ __all__ = [
 @dataclass
 class Person:
     """人员信息数据类"""
-    id: int
-    name: str
-    relation_type: str  # family, friend, worker, stranger
+    name: str = ""
+    relation_type: str = ""  # family, friend, worker, stranger
+    id: Optional[int] = None
     face_encoding: Optional[bytes] = None
+    photo_path: str = ""  # 添加照片路径字段
     custom_greeting: Optional[str] = None
     is_owner: bool = False
     created_at: Optional[datetime] = None
@@ -342,7 +344,8 @@ class Person:
             'id': self.id,
             'name': self.name,
             'relation_type': self.relation_type,
-            'face_encoding': base64.b64encode(self.face_encoding).decode() if self.face_encoding else None,
+            'face_encoding': base64.b64encode(self.face_encoding).decode() if self.face_encoding is not None else None,
+            'photo_path': self.photo_path,  # 添加到字典输出
             'custom_greeting': self.custom_greeting,
             'is_owner': self.is_owner,
             'created_at': self.created_at.isoformat() if self.created_at else None,
@@ -364,12 +367,18 @@ class Person:
 @dataclass
 class AccessPermission:
     """访问权限数据类"""
-    id: int
-    person_id: int
-    permission_type: str  # unlock, view_history, manage_users
+    person_id: int = 0
+    permission_type: str = "permanent"  # permanent, temporary, scheduled
+    id: Optional[int] = None
     granted_by: Optional[int] = None
     valid_from: Optional[datetime] = None
     valid_until: Optional[datetime] = None
+    time_start: Optional[time] = None  # 每日允许开始时间
+    time_end: Optional[time] = None  # 每日允许结束时间
+    day_type: str = "daily"  # daily, weekly, monthly
+    week_days: Optional[str] = None  # 允许的星期几，逗号分隔
+    month_days: Optional[str] = None  # 允许的日期，逗号分隔
+    remaining_count: int = -1  # 临时权限剩余次数，-1 表示无限
     is_active: bool = True
     created_at: Optional[datetime] = None
     
@@ -382,6 +391,12 @@ class AccessPermission:
             'granted_by': self.granted_by,
             'valid_from': self.valid_from.isoformat() if self.valid_from else None,
             'valid_until': self.valid_until.isoformat() if self.valid_until else None,
+            'time_start': self.time_start.isoformat() if self.time_start else None,
+            'time_end': self.time_end.isoformat() if self.time_end else None,
+            'day_type': self.day_type,
+            'week_days': self.week_days,
+            'month_days': self.month_days,
+            'remaining_count': self.remaining_count,
             'is_active': self.is_active,
             'created_at': self.created_at.isoformat() if self.created_at else None
         }
@@ -393,6 +408,10 @@ class AccessPermission:
             data['valid_from'] = datetime.fromisoformat(data['valid_from'])
         if 'valid_until' in data and isinstance(data['valid_until'], str):
             data['valid_until'] = datetime.fromisoformat(data['valid_until'])
+        if 'time_start' in data and isinstance(data['time_start'], str):
+            data['time_start'] = time.fromisoformat(data['time_start'])
+        if 'time_end' in data and isinstance(data['time_end'], str):
+            data['time_end'] = time.fromisoformat(data['time_end'])
         if 'created_at' in data and isinstance(data['created_at'], str):
             data['created_at'] = datetime.fromisoformat(data['created_at'])
         return cls(**data)
